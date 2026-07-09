@@ -30,6 +30,24 @@ export function invoke<P>(
   return fn("call-id", params);
 }
 
+// Like invoke(), but also passes a tool-execution context (the 5th execute
+// arg). Write tools read ctx.hasUI / ctx.ui.editor / ctx.ui.confirm to run
+// the review gate; read tools ignore ctx. Pass a stub ctx from the test.
+export function invokeWithCtx<P, C>(
+  tool: { execute: AnyExecute },
+  params: P,
+  ctx: C,
+): Promise<AgentToolResult<unknown>> {
+  const fn = tool.execute as unknown as (
+    a: string,
+    b: unknown,
+    c: unknown,
+    d: unknown,
+    e: C,
+  ) => Promise<AgentToolResult<unknown>>;
+  return fn("call-id", params, undefined, undefined, ctx);
+}
+
 // Pull the rendered text out of an AgentToolResult. Empty string when the
 // result has no text part (shouldn't happen for our tools).
 export function firstText(result: AgentToolResult<unknown>): string {

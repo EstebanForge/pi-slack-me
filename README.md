@@ -1,10 +1,10 @@
 # @estebanforge/pi-slack-me
 
-Slack **read** tools for [pi](https://github.com/earendil-works/pi-coding-agent) that act as **you**, not as a bot.
+Slack tools for [pi](https://github.com/earendil-works/pi-coding-agent) that act as **you**, not as a bot.
 
-The extension adds 5 LLM-callable tools that read Slack using a **user token** (`xoxp-`). There is no bot to invite into channels and no visible footprint in the workspace: the Slack app inherits *your* membership and access, so the agent sees exactly what you see - public channels, private channels you're in, your DMs, and group DMs.
+The extension adds 8 LLM-callable tools that read and write Slack using a **user token** (`xoxp-`). There is no bot to invite into channels and no visible footprint in the workspace: the Slack app inherits *your* membership and access, so the agent sees (and posts as) exactly what you do - public channels, private channels you're in, your DMs, and group DMs.
 
-Use it when you want an agent to **consume information** from Slack: read feedback, follow issues posted in a channel, search past decisions, or pull a thread's context into a coding session. It is read-only by design; posting, editing, and deleting are intentionally out of scope.
+Use it when you want an agent to **consume information** from Slack (read feedback, follow issues, search past decisions, pull a thread into a coding session) **or post on your behalf** (send a message, reply in a thread, DM someone, edit or delete your own messages). Every write opens in a review dialog before it touches Slack, so nothing is sent or deleted without your say-so.
 
 ## Why a user token (and not a bot)
 
@@ -21,8 +21,28 @@ The tradeoff, per Slack's docs: the app shows an OAuth consent screen the first 
 | `slack_read_thread` | Read all replies in a thread (`conversations.replies`) |
 | `slack_search` | Full-text search across the workspace (`search.messages`) |
 | `slack_download_file` | Download a shared file/image to a temp dir (`files.info` + download) |
+| `slack_post_message` | Post a message to a channel, group DM, or existing DM as you; DM by user ID (`chat.postMessage` + `conversations.open`) |
+| `slack_update_message` | Edit the text of a message you previously posted (`chat.update`) |
+| `slack_delete_message` | Permanently delete one of your messages; always confirmed (`chat.delete`) |
 
 User IDs are resolved to display names (cached), so feedback reads as `**Esteban**: ...` rather than `**U12345**: ...`.
+
+## Write tools & review
+
+The three write tools (`slack_post_message`, `slack_update_message`, `slack_delete_message`) post as **you**. A user token posts as your user natively - no `as_user` flag, no bot. You can only edit or delete messages you authored.
+
+Before any write reaches Slack, the extension shows it for review:
+
+- **post / update** open an **editable** dialog - trim or rewrite the text, then accept or cancel (Esc).
+- **delete** asks **yes/no** - it is irreversible, so it is *always* confirmed even when the review flag is off, and it is **refused in headless mode** rather than running blind.
+
+The editable review is on by default and is governed by the `slack-confirm-write` flag.
+
+**Headless mode** (no interactive UI, e.g. an unsupervised/automated run): post and update are **refused by default** - the extension will not post on your behalf without a human present. Opt in with the `slack-allow-headless-write` flag if you genuinely want unsupervised writes (e.g. scheduled/automation use). Delete is *always* blocked in headless mode, no opt-in.
+
+- `/slack config` - settings modal (TUI)
+- `/slack confirm on` / `/slack confirm off` - toggle the editable review (delete stays guarded regardless)
+- `/slack headless on` / `/slack headless off` - opt in/out of unsupervised (no-UI) writes
 
 ## Setup
 
@@ -47,8 +67,24 @@ In the left sidebar → **OAuth & Permissions** → scroll to **User Token Scope
 | `users:read` | resolve user IDs to display names |
 | `search:read` | `slack_search` (optional but recommended) |
 | `files:read` | download shared files (`slack_download_file`) |
+| `chat:write` | **post / update / delete messages as you** (`slack_post_message`, `slack_update_message`, `slack_delete_message`) |
+| `im:write` | **DM someone via `to_user`** (`slack_post_message` opens the DM via `conversations.open`; not needed for posting to an existing channel/group DM) |
 
 No Bot Token Scopes are needed. There is no bot.
+
+> **Scope at a glance:** `chat:write` covers posting, editing, and deleting. Add `im:write` only if you use `to_user` (DM a user by ID). Reading needs the `*:read` / `*:history` scopes above.
+
+#### Upgrading from a read-only install (v1.x)
+
+If you installed before write support, your existing token lacks `chat:write` and write tools will return `missing_scope`. To add it:
+
+1. [api.slack.com/apps](https://api.slack.com/apps) -> your app -> **OAuth & Permissions** -> **User Token Scopes**.
+2. Add **`chat:write`** (post/update/delete) and, if you will use `to_user` to DM people, **`im:write`** (opens the DM).
+3. **Save** changes, then click **Reinstall to {Workspace}** (Slack requires a reinstall for new scopes to take effect).
+4. Copy the new **User OAuth Token** (`xoxp-...`) - it changes on reinstall.
+5. `export SLACK_USER_TOKEN=xoxp-...` with the new value.
+
+No `/invite` step is needed at any point.
 
 ### 3. Install to workspace
 
@@ -84,12 +120,19 @@ pi install @estebanforge/pi-slack-me
 | `/slack read <channel> [N]` | Read recent messages (prefills `slack_read_messages`) |
 | `/slack thread <channel> <ts>` | Read a thread (prefills `slack_read_thread`) |
 | `/slack search <query>` | Search messages (prefills `slack_search`) |
+| `/slack post <channel> <text>` | Post a message (prefills `slack_post_message`) |
+| `/slack dm <user> <text>` | DM a user by ID (prefills `slack_post_message` with `to_user`) |
+| `/slack reply <channel> <ts> <text>` | Reply in a thread (prefills `slack_post_message` with `thread_ts`) |
+| `/slack edit <channel> <ts> <text>` | Edit your message (prefills `slack_update_message`) |
+| `/slack delete <channel> <ts>` | Delete your message (prefills `slack_delete_message`) |
+| `/slack config` | Settings modal (write review gate) |
+| `/slack confirm on\|off` | Toggle write review (delete stays guarded) |
 
 ## Notes
 
 - **Session scope**: the user token grants workspace-wide read access as you. Treat it like any other credential - `0600` on any file it lands in, never commit it, rotate it if leaked.
 - **Token rotation**: if Slack invalidates the token (e.g. you revoke the app or change your password), calls return `invalid_auth`. Re-install the app and update `SLACK_USER_TOKEN`.
-- **Rate limits**: Slack returns `429` with a `Retry-After` header on rate limit; this extension surfaces the retry hint in the error text. Bulk reads (hundreds of channels) should page via the returned cursor.
+- **Rate limits**: Slack returns `429` with a `Retry-After` header on rate limit; this extension surfaces the retry hint in the error text. Bulk reads (hundreds of channels) should page via the returned cursor. Writes (`chat.postMessage`) are limited to ~1/sec per channel - avoid tight-loop bulk posting.
 - **DM author names**: DM message payloads carry the other user's ID; the extension resolves it via `users.info`. Your own messages show as your display name.
 
 ## Development

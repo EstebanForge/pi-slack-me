@@ -15,7 +15,7 @@ export class SlackAuthError extends Error {
         "Create a Slack app at https://api.slack.com/apps, add the User Token " +
         'Scopes listed in the README (channels:history, groups:history, im:history, ' +
         "mpim:history, channels:read, groups:read, im:read, mpim:read, users:read, " +
-        "search:read), install it to your workspace, then " +
+        "search:read, files:read, chat:write, im:write), install it to your workspace, then " +
         '`export SLACK_USER_TOKEN="xoxp-..."` in the shell that runs pi.',
     );
     this.name = "SlackAuthError";

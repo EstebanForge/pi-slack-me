@@ -86,3 +86,48 @@ export const DOWNLOAD_FILE_DESCRIPTION = `Download a file or image shared in Sla
 
 export const DOWNLOAD_FILE_ID_DESCRIPTION =
   "Slack file ID (F0123ABC456). Find it in a message's files array or via search.";
+
+// -------------------------------------------------- post message ----------
+
+export const POST_MESSAGE_TITLE = "Slack: Post Message";
+
+export const POST_MESSAGE_DESCRIPTION = `Post a message to a Slack channel, group DM, or existing DM as the calling user. Posts as YOU (user token), not a bot. The message opens in an editable review dialog before sending when the slack-confirm-write flag is on (default): you can trim or rewrite the text, or cancel. Provide EITHER channel (a channel/DM/group ID) OR to_user (a user ID like U0123ABC456 to DM someone). Providing both is an error. Set thread_ts to post as a threaded reply instead of a top-level message. Note: posting to a channel needs the chat:write scope; DM-ing via to_user also needs im:write (for conversations.open).`;
+
+export const POST_MESSAGE_CHANNEL_DESCRIPTION =
+  "Channel ID (C...), private channel ID, DM ID (D...), or group DM ID. Get it from slack_list_channels. Omit if using to_user instead.";
+
+export const POST_MESSAGE_TO_USER_DESCRIPTION =
+  "User ID (U0123ABC456) to send a DM to. The extension resolves it to a DM channel via conversations.open, then posts. Omit if using channel instead. One of channel / to_user is required.";
+
+export const POST_MESSAGE_TEXT_DESCRIPTION =
+  "Message text. Slack mrkdwn is supported (*bold*, _italic_, \`code\`, >quote). The user reviews this in an editable dialog before it is sent.";
+
+export const POST_MESSAGE_THREAD_TS_DESCRIPTION =
+  "Timestamp of a parent message to reply in its thread instead of posting top-level. Find the parent's ts in a message's ts field.";
+
+// -------------------------------------------------- update message --------
+
+export const UPDATE_MESSAGE_TITLE = "Slack: Update Message";
+
+export const UPDATE_MESSAGE_DESCRIPTION = `Edit the text of a message YOU previously posted. Posts as YOU (user token): only your own messages can be edited. The new text opens in an editable review dialog before sending when the slack-confirm-write flag is on (default). Requires the channel ID and the message ts (both come from slack_read_messages / slack_read_thread / slack_search).`;
+
+export const UPDATE_MESSAGE_CHANNEL_DESCRIPTION =
+  "Channel ID where the message lives. Get it from slack_list_channels or the message's channel field.";
+
+export const UPDATE_MESSAGE_TS_DESCRIPTION =
+  "Timestamp of the message to edit. Find it in a message's ts field.";
+
+export const UPDATE_MESSAGE_TEXT_DESCRIPTION =
+  "New message text (replaces the old text). Slack mrkdwn is supported. The user reviews this in an editable dialog before it is applied.";
+
+// -------------------------------------------------- delete message --------
+
+export const DELETE_MESSAGE_TITLE = "Slack: Delete Message";
+
+export const DELETE_MESSAGE_DESCRIPTION = `Permanently delete a message as the calling user. ALWAYS asks for yes/no confirmation - even when slack-confirm-write is off, and even blocks in headless mode - because Slack deletes are irreversible. Requires the channel ID and the message ts. With a user token you can only delete your own messages.`;
+
+export const DELETE_MESSAGE_CHANNEL_DESCRIPTION =
+  "Channel ID where the message lives.";
+
+export const DELETE_MESSAGE_TS_DESCRIPTION =
+  "Timestamp of the message to delete. Find it in a message's ts field.";

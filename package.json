@@ -1,14 +1,14 @@
 {
   "name": "@estebanforge/pi-slack-me",
-  "version": "1.0.0",
-  "description": "Slack read tools for Pi that act as YOU, not as a bot. Adds 5 LLM-callable tools (slack_*) that read channels, threads, DMs, and search results using a Slack USER token (xoxp-). No bot to invite, no footprint in the workspace - the app inherits your own membership and access. Read-only by design.",
+  "version": "1.1.0",
+  "description": "Slack tools for Pi that act as YOU, not as a bot. Adds 8 LLM-callable tools (slack_*) that read channels, threads, DMs, and search results, plus post, update, and delete messages using a Slack USER token (xoxp-). No bot to invite, no footprint in the workspace - the app inherits your own membership and access. Write tools open a review dialog before sending.",
   "keywords": [
     "pi-package",
     "pi-extension",
     "slack",
     "slack-api",
-    "read-only",
     "user-token",
+    "chat",
     "coding-agent"
   ],
   "license": "MIT",
@@ -53,6 +53,7 @@
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.3",
+    "@earendil-works/pi-tui": "^0.80.3",
     "@types/node": "^22.0.0",
     "typebox": "^1.3.4",
     "typescript": "^5.8.0",

@@ -19,6 +19,12 @@ export interface SlackGetOptions {
   query?: Record<string, string | number | boolean | undefined>;
 }
 
+export interface SlackPostOptions {
+  /** JSON body. Slack accepts application/json for write methods. */
+  body?: Record<string, unknown>;
+  query?: Record<string, string | number | boolean | undefined>;
+}
+
 // Error carrying the Slack `error` code, HTTP status, and an optional
 // retry-after hint (seconds). isRateLimited / isAuthError let tool callers
 // branch without parsing message text.
@@ -70,6 +76,55 @@ function buildUrl(
   return url.toString();
 }
 
+// Shared response parser for the JSON Web API methods. Handles rate limiting,
+// the {ok:false} logical-failure body (Slack returns HTTP 200 on these), and
+// non-2xx HTTP. Used by both slackGet and slackPost so the parsing logic is
+// not triplicated.
+async function readSlackJson<T = SlackResponse>(
+  method: string,
+  response: Response,
+): Promise<T> {
+  // Rate limited: Slack returns 429 with a Retry-After header (seconds).
+  // Surface it as a structured error so callers can back off precisely.
+  if (response.status === 429) {
+    const retryAfterRaw = response.headers.get("retry-after");
+    const retryAfter = retryAfterRaw ? Number(retryAfterRaw) : undefined;
+    throw new SlackApiError(
+      `Slack rate limited on ${method}.` +
+        (retryAfter ? ` Retry in ~${retryAfter}s.` : " Retry shortly."),
+      response.status,
+      "ratelimited",
+      retryAfter,
+    );
+  }
+
+  const text = await response.text();
+  let parsed: SlackResponse | null = null;
+  try {
+    parsed = JSON.parse(text) as SlackResponse;
+  } catch {
+    // Body was not JSON; fall through to the HTTP-status message below.
+  }
+
+  // Slack usually returns 200 even on logical failure, so check ok first.
+  if (parsed && parsed.ok === false) {
+    throw new SlackApiError(
+      friendlyError(method, parsed.error, response.status),
+      response.status,
+      parsed.error,
+    );
+  }
+
+  if (!response.ok) {
+    throw new SlackApiError(
+      friendlyStatus(method, response.status),
+      response.status,
+    );
+  }
+
+  return (parsed as T) ?? (JSON.parse(text) as T);
+}
+
 // Call a Slack Web API method via GET. Returns the full parsed JSON body
 // (Slack wraps results in {ok, ...}); callers read the fields they need and
 // can grab response_metadata.next_cursor for pagination. Throws SlackApiError
@@ -93,55 +148,55 @@ export async function slackGet<T = SlackResponse>(
     });
   } catch (err) {
     clearTimeout(timer);
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("abort")) {
-      throw new SlackApiError(
-        `Slack request timed out after ${REQUEST_TIMEOUT_MS / 1000}s. Retry; if persistent, check the network or https://status.slack.com.`,
-      );
-    }
-    throw new SlackApiError(`Network error reaching Slack: ${msg}`);
+    throw new SlackApiError(transportError(method, err));
   }
 
   try {
-    // Rate limited: Slack returns 429 with a Retry-After header (seconds).
-    // Surface it as a structured error so callers can back off precisely.
-    if (response.status === 429) {
-      const retryAfterRaw = response.headers.get("retry-after");
-      const retryAfter = retryAfterRaw ? Number(retryAfterRaw) : undefined;
-      throw new SlackApiError(
-        `Slack rate limited on ${method}.` +
-          (retryAfter ? ` Retry in ~${retryAfter}s.` : " Retry shortly."),
-        response.status,
-        "ratelimited",
-        retryAfter,
-      );
-    }
+    return await readSlackJson<T>(method, response);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
-    const text = await response.text();
-    let parsed: SlackResponse | null = null;
-    try {
-      parsed = JSON.parse(text) as SlackResponse;
-    } catch {
-      // Body was not JSON; fall through to the HTTP-status message below.
-    }
+// Call a Slack Web API method via POST with a JSON body. Used by the write
+// tools (chat.postMessage / chat.update / chat.delete). Same response parsing
+// and error handling as slackGet. `body` is sent as application/json; Slack
+// accepts JSON for all write methods.
+export async function slackPost<T = SlackResponse>(
+  method: string,
+  options: SlackPostOptions = {},
+): Promise<T> {
+  const token = getSlackToken();
+  const url = buildUrl(method, options.query);
 
-    // Slack usually returns 200 even on logical failure, so check ok first.
-    if (parsed && parsed.ok === false) {
-      throw new SlackApiError(
-        friendlyError(method, parsed.error, response.status),
-        response.status,
-        parsed.error,
-      );
-    }
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json",
+  };
+  let body: string | undefined;
+  if (options.body !== undefined) {
+    headers["Content-Type"] = "application/json; charset=utf-8";
+    body = JSON.stringify(options.body);
+  }
 
-    if (!response.ok) {
-      throw new SlackApiError(
-        friendlyStatus(method, response.status),
-        response.status,
-      );
-    }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-    return (parsed as T) ?? (JSON.parse(text) as T);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers,
+      body,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    throw new SlackApiError(transportError(method, err));
+  }
+
+  try {
+    return await readSlackJson<T>(method, response);
   } finally {
     clearTimeout(timer);
   }
@@ -167,16 +222,30 @@ export async function slackDownload(url: string): Promise<ArrayBuffer> {
     return await response.arrayBuffer();
   } catch (err) {
     if (err instanceof SlackApiError) throw err;
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("abort")) {
-      throw new SlackApiError(
-        `Slack file download timed out after ${REQUEST_TIMEOUT_MS / 1000}s.`,
-      );
-    }
-    throw new SlackApiError(`Network error downloading Slack file: ${msg}`);
+    throw new SlackApiError(transportError("file download", err));
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Classify a fetch() throw (network error or abort/timeout) into a readable
+// message. Shared by slackGet / slackPost / slackDownload.
+function transportError(method: string, err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg.includes("abort")) {
+    return `Slack ${method} timed out after ${REQUEST_TIMEOUT_MS / 1000}s.`;
+  }
+  return `Network error reaching Slack (${method}): ${msg}`;
+}
+
+// The OAuth scope a given Web API method needs (user token). Used to make the
+// missing_scope error point at the RIGHT scope instead of a hardcoded one.
+// chat.* methods are all chat:write; opening a DM (conversations.open) needs
+// im:write, which is easy to miss when adding DM support.
+function requiredScopeFor(method: string): string {
+  if (method.startsWith("chat.")) return "chat:write";
+  if (method === "conversations.open") return "im:write";
+  return "a required scope";
 }
 
 // Map Slack `error` codes to hints an agent can act on. Keep terse; the code
@@ -189,7 +258,9 @@ function friendlyError(method: string, code: string | undefined, status: number)
     case "channel_not_found":
       return `Slack: channel_not_found. The channel ID is wrong, archived, or not visible to the calling user. Run slack_list_channels to confirm.`;
     case "missing_scope":
-      return `Slack: missing_scope. The user token lacks a required scope for ${method}. Re-install the app with the scopes listed in the README.`;
+      return `Slack: missing_scope. The user token lacks ${requiredScopeFor(method)} for ${method}. Re-install the app with the scopes listed in the README.`;
+    case "cant_update_message":
+      return `Slack: cant_update_message. Only messages authored by the calling user can be edited with a user token. Verify the message ts is one of your own.`;
     case "invalid_auth":
     case "not_authed":
     case "token_revoked":

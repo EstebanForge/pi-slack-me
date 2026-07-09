@@ -129,3 +129,101 @@ describe("slackDownload", () => {
     await expect(slackDownload("https://files.slack.com/x")).rejects.toThrow(SlackApiError);
   });
 });
+
+describe("slackPost", () => {
+  // Capture-aware fetch mock: returns the captured init so tests can assert
+  // method, headers, and the JSON body sent on a POST.
+  function mockPost(body: unknown, status = 200, headers: Record<string, string> = {}) {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: (h: string) => headers[h.toLowerCase()] ?? null },
+      text: async () => JSON.stringify(body),
+      json: async () => body,
+    } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("POSTs with bearer auth, JSON content-type, and a JSON-stringified body", async () => {
+    const fetchMock = mockPost({ ok: true, channel: "C1", ts: "1" });
+    const { slackPost } = await import("../lib/api");
+    await slackPost("chat.postMessage", { body: { channel: "C1", text: "hi" } });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("chat.postMessage");
+    expect(init.method).toBe("POST");
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer xoxp-test");
+    expect(headers["Content-Type"]).toBe("application/json; charset=utf-8");
+    expect(JSON.parse(init.body as string)).toEqual({ channel: "C1", text: "hi" });
+  });
+
+  it("does NOT set Content-Type when no body is supplied", async () => {
+    const fetchMock = mockPost({ ok: true });
+    const { slackPost } = await import("../lib/api");
+    await slackPost("chat.delete", { query: { channel: "C1" } });
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
+    expect(init.body).toBeUndefined();
+  });
+
+  it("serializes query params alongside a POST body", async () => {
+    const fetchMock = mockPost({ ok: true });
+    const { slackPost } = await import("../lib/api");
+    await slackPost("chat.update", { query: { foo: "bar" }, body: { x: 1 } });
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("foo=bar");
+  });
+
+  it("maps a logical {ok:false} body to a SlackApiError with the code", async () => {
+    mockPost({ ok: false, error: "cant_update_message" });
+    const { slackPost, SlackApiError } = await import("../lib/api");
+    try {
+      await slackPost("chat.update", { body: {} });
+      expect.unreachable("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(SlackApiError);
+      expect((err as { code?: string }).code).toBe("cant_update_message");
+    }
+  });
+
+  it("surfaces 429 through the POST path with retry-after", async () => {
+    mockPost({ ok: false, error: "ratelimited" }, 429, { "retry-after": "8" });
+    const { slackPost } = await import("../lib/api");
+    try {
+      await slackPost("chat.postMessage", { body: {} });
+      expect.unreachable("expected throw");
+    } catch (err) {
+      expect((err as { isRateLimited: boolean }).isRateLimited).toBe(true);
+      expect((err as { retryAfter?: number }).retryAfter).toBe(8);
+    }
+  });
+
+  // missing_scope must name the RIGHT scope for the method that failed, not a
+  // hardcoded one. This pins requiredScopeFor() through its only consumer
+  // (friendlyError) so the DM path (conversations.open -> im:write) cannot
+  // regress to telling the user to add chat:write.
+  it("missing_scope on chat.* names chat:write (not im:write)", async () => {
+    mockPost({ ok: false, error: "missing_scope" });
+    const { slackPost } = await import("../lib/api");
+    try {
+      await slackPost("chat.postMessage", { body: {} });
+      expect.unreachable("expected throw");
+    } catch (err) {
+      expect((err as Error).message).toContain("chat:write");
+      expect((err as Error).message).not.toContain("im:write");
+    }
+  });
+
+  it("missing_scope on conversations.open names im:write (not chat:write)", async () => {
+    mockPost({ ok: false, error: "missing_scope" });
+    const { slackPost } = await import("../lib/api");
+    try {
+      await slackPost("conversations.open", { body: {} });
+      expect.unreachable("expected throw");
+    } catch (err) {
+      expect((err as Error).message).toContain("im:write");
+      expect((err as Error).message).not.toContain("chat:write");
+    }
+  });
+});
