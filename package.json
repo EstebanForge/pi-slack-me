@@ -21,11 +21,15 @@
     "type": "git",
     "url": "git+https://github.com/EstebanForge/pi-slack-me.git"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test"
   },
   "files": [
     "extensions",
