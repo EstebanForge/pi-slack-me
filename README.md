@@ -6,6 +6,8 @@ The extension adds 9 LLM-callable tools that read and write Slack using a **user
 
 Use it when you want an agent to **consume information** from Slack (read feedback, follow issues, search past decisions, pull a thread into a coding session), **post on your behalf** (send a message, reply in a thread, DM someone, edit or delete your own messages), or add reactions. Message writes open in a review dialog before they touch Slack; reactions are applied immediately when the reaction tool runs.
 
+An optional [Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode) listener receives public-channel messages in real time. It is deliberately passive: incoming Slack text never triggers an LLM turn automatically. Messages stay in a bounded, in-memory inbox until you explicitly place them in the editor with `/slack inbox` and submit them yourself.
+
 ## Why a user token (and not a bot)
 
 A bot token (`xoxb-`) can only read channels the bot has been explicitly invited to, and it can never read your DMs. That forces a visible new member into every channel you care about. A **user token** (`xoxp-`) speaks as your user, so the app reads anything your user can read, with no `/invite` step and no bot appearing anywhere. This is a fully supported Slack auth mode - every `*:history` scope lists `User` as a supported token type.
@@ -27,6 +29,26 @@ The tradeoff, per Slack's docs: the app shows an OAuth consent screen the first 
 | `slack_add_reaction` | Add an emoji reaction as you (`reactions.add`) |
 
 User IDs are resolved to display names (cached), so feedback reads as `**Esteban**: ...` rather than `**U12345**: ...`.
+
+## Passive Socket Mode inbox
+
+Setting `SLACK_APP_TOKEN` enables a session-scoped connection through Slack's official `@slack/socket-mode` client. Each incoming envelope is acknowledged immediately, then filtered locally. The inbox retains:
+
+- normal public-channel messages that mention your authenticated Slack user;
+- normal messages from channel IDs listed in `SLACK_LISTEN_CHANNELS`.
+
+It ignores your own posts, bot and system messages, edits, deletes, private channels, and DMs. Mentions produce a toast containing the author, channel, and a short preview. Non-mention messages from watched channels only update the `Slack: N unread` footer.
+
+The safety boundary is explicit:
+
+- Slack message text is treated as **untrusted external content**, never as an instruction;
+- no event calls `sendUserMessage` or starts an agent turn;
+- the inbox holds at most 100 messages and is never written to the pi session or another file;
+- `/slack inbox [N]` marks the selected messages read and places structured JSON in the editor, where you can inspect or amend it before pressing Enter;
+- `/slack inbox clear` removes all retained messages;
+- reload, session replacement, and exit disconnect the socket and discard the inbox.
+
+`SLACK_LISTEN_CHANNELS` accepts comma- or whitespace-separated channel IDs. Leave it unset for mention-only behavior. Use `slack_list_channels` or `/slack channels` to find IDs.
 
 ## Write tools & review
 
@@ -109,15 +131,44 @@ After installing, the same page shows:
 export SLACK_USER_TOKEN=xoxp-...
 ```
 
-### 5. Done
+### 5. Optional: enable the passive Socket Mode inbox
 
-No `/invite` step. No bot in any channel. The token reads as your user.
+Socket Mode needs a separate **app-level token** (`xapp-`), not another user scope:
+
+1. Open your app at [api.slack.com/apps](https://api.slack.com/apps) → **Socket Mode** and enable it.
+2. Open **Event Subscriptions**, enable events, and under **Subscribe to events on behalf of users** add `message.channels`. This event uses the existing `channels:history` user scope.
+3. Open **Basic Information** → **App-Level Tokens** → **Generate Token and Scopes**. Give the token a name and add `connections:write`.
+4. Copy the generated `xapp-` token and export it before starting pi:
+
+```bash
+export SLACK_APP_TOKEN=xapp-...
+# Optional: retain every normal message from selected public channels.
+export SLACK_LISTEN_CHANNELS=C0123ABC456,C0987XYZ654
+```
+
+The equivalent manifest settings are:
+
+```yaml
+settings:
+  socket_mode_enabled: true
+  event_subscriptions:
+    user_events:
+      - message.channels
+```
+
+`SLACK_APP_TOKEN` is the opt-in switch. Without it, the nine Slack tools behave exactly as before and no socket is opened. Restart pi after adding or replacing the token.
+
+### 6. Done
+
+No `/invite` step. No bot in any channel. The Web API tools and Socket Mode events both act on behalf of the authorized user.
 
 ## Install
 
 ```bash
 pi install @estebanforge/pi-slack-me
 ```
+
+Requires Node.js 20.18.1 or newer (the minimum supported by the Socket Mode transport dependency).
 
 ## Commands
 
@@ -134,13 +185,18 @@ pi install @estebanforge/pi-slack-me
 | `/slack reply <channel> <ts> <text>` | Reply in a thread (prefills `slack_post_message` with `thread_ts`) |
 | `/slack edit <channel> <ts> <text>` | Edit your message (prefills `slack_update_message`) |
 | `/slack delete <channel> <ts>` | Delete your message (prefills `slack_delete_message`) |
+| `/slack inbox [N]` | Place the latest 1-100 retained messages in the editor without submitting them |
+| `/slack inbox clear` | Empty the in-memory inbox |
+| `/slack listen status\|on\|off` | Inspect or control the session's Socket Mode connection |
 | `/slack config` | Settings modal (write review gate) |
 | `/slack confirm on\|off` | Toggle write review (delete stays guarded) |
+| `/slack headless on\|off` | Toggle the headless write opt-in |
 
 ## Notes
 
-- **Session scope**: the user token grants workspace-wide read access as you. Treat it like any other credential - `0600` on any file it lands in, never commit it, rotate it if leaked.
-- **Token rotation**: if Slack invalidates the token (e.g. you revoke the app or change your password), calls return `invalid_auth`. Re-install the app and update `SLACK_USER_TOKEN`.
+- **Credential scope**: the user token grants workspace access as you, while the app-level token opens Socket Mode connections. Treat both like credentials - `0600` on any file they land in, never commit them, and rotate either token if leaked.
+- **Token rotation**: if Slack invalidates the user token (e.g. you revoke the app or change your password), calls return `invalid_auth`. Re-install the app and update `SLACK_USER_TOKEN`. Replace `SLACK_APP_TOKEN` separately if its app-level token is revoked.
+- **Concurrent listeners**: run one active pi listener per Slack app when you need a complete inbox. Slack can distribute envelopes across multiple simultaneous Socket Mode connections rather than sending every envelope to every process.
 - **Rate limits**: Slack returns `429` with a `Retry-After` header on rate limit; this extension surfaces the retry hint in the error text. Bulk reads (hundreds of channels) should page via the returned cursor. Writes (`chat.postMessage`) are limited to ~1/sec per channel - avoid tight-loop bulk posting.
 - **DM author names**: DM message payloads carry the other user's ID; the extension resolves it via `users.info`. Your own messages show as your display name.
 

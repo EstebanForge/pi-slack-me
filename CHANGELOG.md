@@ -6,6 +6,16 @@
 
 - `slack_add_reaction` — add an emoji reaction as the calling user via
   `reactions.add`. Requires `reactions:write`.
+- Opt-in Socket Mode listener using Slack's official `@slack/socket-mode`
+  client. `SLACK_APP_TOKEN` starts a lifecycle-managed connection for
+  `message.channels` user events; `SLACK_LISTEN_CHANNELS` optionally retains
+  every normal message from selected public channels.
+- Passive, session-local inbox capped at 100 messages. Mentions show a toast;
+  watched-channel messages update an unread footer without triggering an LLM
+  turn or persisting Slack content.
+- `/slack inbox [N|clear]` and `/slack listen status|on|off` commands.
+- Runtime dependencies on `@slack/socket-mode` and `undici`; Node.js 20.18.1
+  or newer is required.
 
 ### Changed
 
@@ -13,12 +23,18 @@
   and group-DM scopes are only needed when those conversation types are
   explicitly requested.
 - Setup documentation separates the public-channel baseline from optional
-  capability scopes.
+  capability scopes and documents the app-level `connections:write` token,
+  `message.channels` user-event subscription, and Socket Mode manifest.
+- Incoming message events are acknowledged before local filtering, deduplicated,
+  name-resolved with in-memory caches, and ordered by Slack timestamp. Own,
+  bot, system, edited, deleted, private-channel, and DM events are ignored.
 
 ### Fixed
 
 - Successful non-JSON Slack responses now surface as `SlackApiError` rather
   than leaking a raw JSON parser exception.
+- Socket connection errors redact app tokens and WebSocket URLs before they
+  reach pi notifications.
 
 ## 1.1.1 — 2026-08-06
 
