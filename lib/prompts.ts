@@ -7,13 +7,13 @@
 
 export const LIST_CHANNELS_TITLE = "Slack: List Conversations";
 
-export const LIST_CHANNELS_DESCRIPTION = `List Slack conversations the calling user can see (channels, DMs, and group DMs). Uses a user token, so this returns exactly what YOU see as a member - public channels, private channels you are in, your DMs and group DMs. No bot needs to be invited. Use this FIRST to resolve a channel/DM name to its ID before reading messages.`;
+export const LIST_CHANNELS_DESCRIPTION = `List Slack conversations visible to the calling user. Defaults to public channels the user belongs to, so private-channel and DM scopes are optional. Pass types to request private channels, DMs, or group DMs when the user token has the corresponding scopes. No bot needs to be invited. Use this FIRST to resolve a conversation name to its ID before reading messages.`;
 
 export const LIST_CHANNELS_LIMIT_DESCRIPTION =
   "Max conversations to return (1-999). Default 200.";
 
 export const LIST_CHANNELS_TYPES_DESCRIPTION =
-  'Comma-separated types. Default "public_channel,private_channel,im,mpim". Narrow to e.g. "im" to list only DMs.';
+  'Comma-separated types. Default "public_channel". Use "private_channel", "im", or "mpim" only when the token has the corresponding scopes.';
 
 export const LIST_CHANNELS_CURSOR_DESCRIPTION =
   "Pagination cursor from a previous response's next_cursor.";
@@ -100,7 +100,7 @@ export const POST_MESSAGE_TO_USER_DESCRIPTION =
   "User ID (U0123ABC456) to send a DM to. The extension resolves it to a DM channel via conversations.open, then posts. Omit if using channel instead. One of channel / to_user is required.";
 
 export const POST_MESSAGE_TEXT_DESCRIPTION =
-  "Message text. Slack mrkdwn is supported (*bold*, _italic_, \`code\`, >quote). The user reviews this in an editable dialog before it is sent.";
+  "Message text. Slack mrkdwn is supported (*bold*, _italic_, `code`, >quote). The user reviews this in an editable dialog before it is sent.";
 
 export const POST_MESSAGE_THREAD_TS_DESCRIPTION =
   "Timestamp of a parent message to reply in its thread instead of posting top-level. Find the parent's ts in a message's ts field.";
@@ -131,3 +131,18 @@ export const DELETE_MESSAGE_CHANNEL_DESCRIPTION =
 
 export const DELETE_MESSAGE_TS_DESCRIPTION =
   "Timestamp of the message to delete. Find it in a message's ts field.";
+
+// -------------------------------------------------- add reaction ----------
+
+export const ADD_REACTION_TITLE = "Slack: Add Reaction";
+
+export const ADD_REACTION_DESCRIPTION = `Add an emoji reaction to a message as the calling user. Provide the emoji shortcode without colons (for example, thumbsup, robot_face, or tada). Requires reactions:write. The channel ID and message timestamp come from slack_read_messages or slack_read_thread.`;
+
+export const ADD_REACTION_CHANNEL_DESCRIPTION =
+  "Channel ID where the message lives.";
+
+export const ADD_REACTION_NAME_DESCRIPTION =
+  "Emoji shortcode without colons, for example thumbsup, robot_face, or tada.";
+
+export const ADD_REACTION_TIMESTAMP_DESCRIPTION =
+  "Timestamp of the target message. Find it in the message's ts field.";

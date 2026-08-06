@@ -1,16 +1,15 @@
 /**
  * pi-slack-me - Slack tools for pi that act as YOU.
  *
- * Adds 8 LLM-callable tools that talk to the Slack Web API using a USER token
+ * Adds 9 LLM-callable tools that talk to the Slack Web API using a USER token
  * (xoxp-). There is no bot to invite: the app inherits the calling user's
  * membership and access, so it can read public channels, private channels the
  * user is in, DMs, and group DMs - exactly what the user sees in the Slack
  * client.
  *
- * Five read tools (list, read, thread, search, download) plus three write
- * tools (post, update, delete). The write tools post as the user. Posting,
- * editing, and DM-sending open an editable review dialog before sending; the
- * destructive delete tool is always confirmed and blocked in headless mode.
+ * Five tools read Slack; three guarded tools post, update, or delete messages;
+ * and one adds reactions. Message writes use the review gate. Reactions are
+ * applied immediately when the reaction tool runs.
  *
  * Based on: Slack Web API - https://docs.slack.dev/reference/methods
  *           "act as me" user-token model per
@@ -22,6 +21,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { Container, SettingsList, Text, type SettingItem } from "@earendil-works/pi-tui";
+import { addReactionTool } from "../lib/tools/add-reaction";
 import { listChannelsTool } from "../lib/tools/list-channels";
 import { readMessagesTool } from "../lib/tools/read-messages";
 import { readThreadTool } from "../lib/tools/read-thread";
@@ -48,12 +48,13 @@ import {
 // that write tools gate themselves.
 const TOOL_GUIDANCE = [
   "These tools act as the USER, not a bot: they read and post exactly what the user Slack account can, including DMs and private channels you are a member of.",
-  "Use slack_list_channels FIRST to discover conversation IDs (channels C..., DMs D..., groups). It returns your membership view, including DMs.",
+  "Use slack_list_channels FIRST to discover conversation IDs. It defaults to public channels; request private_channel, im, or mpim only when the token has the corresponding scopes.",
   "Use slack_read_messages to read a channel's recent history; slack_read_thread to read a thread's replies.",
   "Use slack_search for full-text search across the workspace (supports in:#channel, from:@user, after:YYYY-MM-DD). Great for finding feedback or reported issues.",
   "When a message references a file/image (shown with 📎), use slack_download_file with the file ID, then use the `read` tool on the returned path to view images.",
-  "Write tools (slack_post_message, slack_update_message, slack_delete_message) gate themselves: post/update open an editable preview and delete asks yes/no. Call them directly; the extension handles review. You do NOT need to ask the user yourself.",
+  "Message write tools (slack_post_message, slack_update_message, slack_delete_message) gate themselves: post/update open an editable preview and delete asks yes/no. Call them directly; the extension handles review. You do NOT need to ask the user yourself.",
   "slack_post_message posts as you. Pass channel for a channel/group/DM, OR to_user (a U... user ID) to DM someone (not both). Set thread_ts to reply in a thread. Posting needs the chat:write scope; DM-ing via to_user also needs im:write.",
+  "slack_add_reaction adds an emoji reaction as you and requires reactions:write.",
   "slack_delete_message is irreversible and is ALWAYS confirmed (even when the gate is off); in headless mode it is refused rather than running blind.",
   "In HEADLESS mode (no interactive UI), post/update are REFUSED by default (an unsupervised run cannot post on the user's behalf). The slack-allow-headless-write flag opts in to headless writes; delete is blocked headless regardless.",
 ].join(" ");
@@ -82,6 +83,7 @@ function slackMe(pi: ExtensionAPI): void {
   pi.registerTool(postMessageTool);
   pi.registerTool(updateMessageTool);
   pi.registerTool(deleteMessageTool);
+  pi.registerTool(addReactionTool);
 
   pi.on("before_agent_start", async (event) => {
     return {
@@ -143,7 +145,7 @@ function slackMe(pi: ExtensionAPI): void {
         case "list":
           prompt = rest
             ? `Call the slack_list_channels tool with types="${rest}" to list the Slack conversations you can see.`
-            : `Call the slack_list_channels tool to list the Slack conversations you can see (channels, DMs, groups).`;
+            : `Call the slack_list_channels tool to list the public Slack channels you belong to.`;
           break;
         case "dms":
         case "dm": {

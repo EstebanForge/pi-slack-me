@@ -1,8 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `slack_add_reaction` — add an emoji reaction as the calling user via
+  `reactions.add`. Requires `reactions:write`.
+
+### Changed
+
+- `slack_list_channels` now defaults to public channels. Private-channel, DM,
+  and group-DM scopes are only needed when those conversation types are
+  explicitly requested.
+- Setup documentation separates the public-channel baseline from optional
+  capability scopes.
+
+### Fixed
+
+- Successful non-JSON Slack responses now surface as `SlackApiError` rather
+  than leaking a raw JSON parser exception.
+
 ## 1.1.1 — 2026-08-06
 
 ### Changed
+
 - **Dependencies updated.** Raised the `pi-coding-agent`, `pi-tui` dev pins to `^0.84.0`. Audited against the pi v0.84.0 breaking changes (renamed `ModelsRequestTransforms`, null-tolerant `getApiKeyAndHeaders` headers, dropped `message_update` partial fields, v4 session APIs); no code changes were needed and `tsc`/`typecheck` passes against 0.84.0.
 
 ## 1.1.0 — 2026-07-09
@@ -14,6 +35,7 @@ then a review) modeled on pi-asana's `lib/confirm.ts`. The extension is no
 longer read-only.
 
 ### Added
+
 - `slack_post_message` — post a message as the user to a channel, group DM,
   or existing DM (`chat.postMessage`). Accepts `channel` OR `to_user` (a
   `U..` user ID resolved to a DM via `conversations.open`); `thread_ts` posts
@@ -62,6 +84,7 @@ Slack call:
    (skipped when `slack-confirm-write` is off); delete always asks yes/no.
 
 ### Fixed
+
 - **DM scope gap.** DM-ing via `to_user` calls `conversations.open`, which
   requires the `im:write` scope (confirmed against Slack docs), not just
   `chat:write`. README scope table, the migration note, `auth.ts` error
@@ -77,6 +100,7 @@ Slack call:
   one flag never clobbers the other.
 
 ### Changed
+
 - Extension now ships 8 tools (was 5); no longer read-only.
 - `TOOL_GUIDANCE` extended to describe the write tools, that they gate
   themselves, and the headless default.
@@ -98,6 +122,7 @@ no bot to invite and no visible footprint in the workspace. Read-only by
 design; posting, editing, and deleting are intentionally out of scope.
 
 ### Added
+
 - `slack_list_channels` — list conversations the calling user can see via
   `users.conversations`. Returns the user's membership view, including DMs
   (`D..`) and group DMs. First step to resolve a name to a conversation ID.

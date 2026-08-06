@@ -66,14 +66,15 @@ function buildUrl(
   method: string,
   query: SlackGetOptions["query"],
 ): string {
-  const url = new URL(`${SLACK_BASE_URL}/${method}`);
+  const params = new URLSearchParams();
   if (query) {
     for (const [k, v] of Object.entries(query)) {
       if (v === undefined || v === null) continue;
-      url.searchParams.set(k, String(v));
+      params.set(k, String(v));
     }
   }
-  return url.toString();
+  const queryString = params.toString();
+  return `${SLACK_BASE_URL}/${method}${queryString ? `?${queryString}` : ""}`;
 }
 
 // Shared response parser for the JSON Web API methods. Handles rate limiting,
@@ -122,7 +123,14 @@ async function readSlackJson<T = SlackResponse>(
     );
   }
 
-  return (parsed as T) ?? (JSON.parse(text) as T);
+  if (!parsed) {
+    throw new SlackApiError(
+      `Slack ${method}: invalid JSON response.`,
+      response.status,
+    );
+  }
+
+  return parsed as T;
 }
 
 // Call a Slack Web API method via GET. Returns the full parsed JSON body
@@ -240,11 +248,12 @@ function transportError(method: string, err: unknown): string {
 
 // The OAuth scope a given Web API method needs (user token). Used to make the
 // missing_scope error point at the RIGHT scope instead of a hardcoded one.
-// chat.* methods are all chat:write; opening a DM (conversations.open) needs
-// im:write, which is easy to miss when adding DM support.
+// chat.* methods are all chat:write; conversations.open and reactions.add
+// require scopes that cannot be inferred from their method prefixes.
 function requiredScopeFor(method: string): string {
   if (method.startsWith("chat.")) return "chat:write";
   if (method === "conversations.open") return "im:write";
+  if (method === "reactions.add") return "reactions:write";
   return "a required scope";
 }
 

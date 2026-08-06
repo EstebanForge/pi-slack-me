@@ -96,6 +96,20 @@ describe("slackGet", () => {
     }
   });
 
+  it("surfaces a successful non-JSON response as a Slack API error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        text: async () => "not-json",
+      } as unknown as Response),
+    );
+    const { slackGet, SlackApiError } = await import("../lib/api");
+    await expect(slackGet("auth.test")).rejects.toThrow(SlackApiError);
+  });
+
   it("aborts on network throw and yields a timeout-shaped error", async () => {
     vi.stubGlobal(
       "fetch",
@@ -155,7 +169,7 @@ describe("slackPost", () => {
     const headers = init.headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer xoxp-test");
     expect(headers["Content-Type"]).toBe("application/json; charset=utf-8");
-    expect(JSON.parse(init.body as string)).toEqual({ channel: "C1", text: "hi" });
+    expect(init.body).toBe(JSON.stringify({ channel: "C1", text: "hi" }));
   });
 
   it("does NOT set Content-Type when no body is supplied", async () => {

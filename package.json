@@ -1,7 +1,7 @@
 {
   "name": "@estebanforge/pi-slack-me",
   "version": "1.1.1",
-  "description": "Slack tools for Pi that act as YOU, not as a bot. Adds 8 LLM-callable tools (slack_*) that read channels, threads, DMs, and search results, plus post, update, and delete messages using a Slack USER token (xoxp-). No bot to invite, no footprint in the workspace - the app inherits your own membership and access. Write tools open a review dialog before sending.",
+  "description": "Slack tools for Pi that act as YOU, not as a bot. Adds 9 LLM-callable tools (slack_*) that read channels, threads, DMs, and search results; post, update, and delete messages; and add reactions using a Slack USER token (xoxp-). No bot to invite, no footprint in the workspace.",
   "keywords": [
     "pi-package",
     "pi-extension",

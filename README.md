@@ -2,9 +2,9 @@
 
 Slack tools for [pi](https://github.com/earendil-works/pi-coding-agent) that act as **you**, not as a bot.
 
-The extension adds 8 LLM-callable tools that read and write Slack using a **user token** (`xoxp-`). There is no bot to invite into channels and no visible footprint in the workspace: the Slack app inherits *your* membership and access, so the agent sees (and posts as) exactly what you do - public channels, private channels you're in, your DMs, and group DMs.
+The extension adds 9 LLM-callable tools that read and write Slack using a **user token** (`xoxp-`). There is no bot to invite into channels and no visible footprint in the workspace: the Slack app inherits *your* membership and access, so the agent sees (and posts as) exactly what you do - public channels, private channels you're in, your DMs, and group DMs.
 
-Use it when you want an agent to **consume information** from Slack (read feedback, follow issues, search past decisions, pull a thread into a coding session) **or post on your behalf** (send a message, reply in a thread, DM someone, edit or delete your own messages). Every write opens in a review dialog before it touches Slack, so nothing is sent or deleted without your say-so.
+Use it when you want an agent to **consume information** from Slack (read feedback, follow issues, search past decisions, pull a thread into a coding session), **post on your behalf** (send a message, reply in a thread, DM someone, edit or delete your own messages), or add reactions. Message writes open in a review dialog before they touch Slack; reactions are applied immediately when the reaction tool runs.
 
 ## Why a user token (and not a bot)
 
@@ -15,8 +15,8 @@ The tradeoff, per Slack's docs: the app shows an OAuth consent screen the first 
 ## Tools
 
 | Tool | Description |
-|------|-------------|
-| `slack_list_channels` | List conversations you can see (channels, DMs, group DMs) via `users.conversations` |
+| ------ | ------------- |
+| `slack_list_channels` | List public channels by default; optionally request private channels, DMs, or group DMs via `users.conversations` |
 | `slack_read_messages` | Read message history from a channel or DM (`conversations.history`) |
 | `slack_read_thread` | Read all replies in a thread (`conversations.replies`) |
 | `slack_search` | Full-text search across the workspace (`search.messages`) |
@@ -24,19 +24,20 @@ The tradeoff, per Slack's docs: the app shows an OAuth consent screen the first 
 | `slack_post_message` | Post a message to a channel, group DM, or existing DM as you; DM by user ID (`chat.postMessage` + `conversations.open`) |
 | `slack_update_message` | Edit the text of a message you previously posted (`chat.update`) |
 | `slack_delete_message` | Permanently delete one of your messages; always confirmed (`chat.delete`) |
+| `slack_add_reaction` | Add an emoji reaction as you (`reactions.add`) |
 
 User IDs are resolved to display names (cached), so feedback reads as `**Esteban**: ...` rather than `**U12345**: ...`.
 
 ## Write tools & review
 
-The three write tools (`slack_post_message`, `slack_update_message`, `slack_delete_message`) post as **you**. A user token posts as your user natively - no `as_user` flag, no bot. You can only edit or delete messages you authored.
+The three message-write tools (`slack_post_message`, `slack_update_message`, `slack_delete_message`) post as **you**. A user token posts as your user natively - no `as_user` flag, no bot. You can only edit or delete messages you authored.
 
-Before any write reaches Slack, the extension shows it for review:
+Before any message write reaches Slack, the extension shows it for review:
 
 - **post / update** open an **editable** dialog - trim or rewrite the text, then accept or cancel (Esc).
 - **delete** asks **yes/no** - it is irreversible, so it is *always* confirmed even when the review flag is off, and it is **refused in headless mode** rather than running blind.
 
-The editable review is on by default and is governed by the `slack-confirm-write` flag.
+The editable review is on by default and is governed by the `slack-confirm-write` flag. `slack_add_reaction` is not covered by this message-review gate; it applies the requested reaction immediately.
 
 **Headless mode** (no interactive UI, e.g. an unsupervised/automated run): post and update are **refused by default** - the extension will not post on your behalf without a human present. Opt in with the `slack-allow-headless-write` flag if you genuinely want unsupervised writes (e.g. scheduled/automation use). Delete is *always* blocked in headless mode, no opt-in.
 
@@ -54,35 +55,43 @@ Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** �
 
 In the left sidebar → **OAuth & Permissions** → scroll to **User Token Scopes** (not Bot Token Scopes).
 
+For public-channel access with author names resolved, start with:
+
 | Scope | Enables |
-|-------|---------|
+| ------- | --------- |
 | `channels:read` | list public channels |
-| `groups:read` | list private channels |
-| `im:read` | list DMs |
-| `mpim:read` | list group DMs |
 | `channels:history` | read public channel messages |
-| `groups:history` | read private channel messages |
-| `im:history` | read your DMs |
-| `mpim:history` | read group DMs |
 | `users:read` | resolve user IDs to display names |
-| `search:read` | `slack_search` (optional but recommended) |
+
+`slack_list_channels` defaults to `public_channel`, so private-channel and DM scopes are not required for the baseline. Add only the scopes needed for extra capabilities:
+
+| Optional scope | Enables |
+| ---------------- | --------- |
+| `groups:read` | list private channels |
+| `groups:history` | read private channel messages |
+| `im:read` | list DMs |
+| `im:history` | read DMs |
+| `mpim:read` | list group DMs |
+| `mpim:history` | read group DMs |
+| `search:read` | search workspace messages (`slack_search`) |
 | `files:read` | download shared files (`slack_download_file`) |
-| `chat:write` | **post / update / delete messages as you** (`slack_post_message`, `slack_update_message`, `slack_delete_message`) |
-| `im:write` | **DM someone via `to_user`** (`slack_post_message` opens the DM via `conversations.open`; not needed for posting to an existing channel/group DM) |
+| `chat:write` | post, update, and delete messages as you |
+| `im:write` | open a DM when `slack_post_message` uses `to_user` |
+| `reactions:write` | add emoji reactions (`slack_add_reaction`) |
 
 No Bot Token Scopes are needed. There is no bot.
 
-> **Scope at a glance:** `chat:write` covers posting, editing, and deleting. Add `im:write` only if you use `to_user` (DM a user by ID). Reading needs the `*:read` / `*:history` scopes above.
+> **Scope at a glance:** public channels need `channels:read` and `channels:history`; `users:read` provides names instead of raw IDs. Everything else is capability-specific.
 
-#### Upgrading from a read-only install (v1.x)
+#### Adding write or reaction capabilities
 
-If you installed before write support, your existing token lacks `chat:write` and write tools will return `missing_scope`. To add it:
+A token receives newly configured scopes only after the app is reinstalled:
 
 1. [api.slack.com/apps](https://api.slack.com/apps) -> your app -> **OAuth & Permissions** -> **User Token Scopes**.
-2. Add **`chat:write`** (post/update/delete) and, if you will use `to_user` to DM people, **`im:write`** (opens the DM).
-3. **Save** changes, then click **Reinstall to {Workspace}** (Slack requires a reinstall for new scopes to take effect).
-4. Copy the new **User OAuth Token** (`xoxp-...`) - it changes on reinstall.
-5. `export SLACK_USER_TOKEN=xoxp-...` with the new value.
+2. Add `chat:write` for message writes, `im:write` for opening DMs by user ID, and/or `reactions:write` for reactions.
+3. Save changes, then click **Reinstall to {Workspace}**.
+4. Copy the current **User OAuth Token** (`xoxp-...`); Slack may rotate it during reinstall.
+5. Update `SLACK_USER_TOKEN` in the shell that runs pi.
 
 No `/invite` step is needed at any point.
 
@@ -113,9 +122,9 @@ pi install @estebanforge/pi-slack-me
 ## Commands
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `/slack` | Show token status and usage |
-| `/slack channels [types]` | List conversations (prefills `slack_list_channels`) |
+| `/slack channels [types]` | List public channels by default, or the requested conversation types |
 | `/slack dms` | List your DMs (prefills `slack_list_channels` with `types=im`) |
 | `/slack read <channel> [N]` | Read recent messages (prefills `slack_read_messages`) |
 | `/slack thread <channel> <ts>` | Read a thread (prefills `slack_read_thread`) |

@@ -43,7 +43,7 @@ export const listChannelsTool: ToolDefinition<typeof Params, undefined> = {
       const resp = await slackGet<ListResponse>("users.conversations", {
         query: {
           limit: params.limit ?? 200,
-          types: params.types ?? "public_channel,private_channel,im,mpim",
+          types: params.types ?? "public_channel",
           cursor: params.cursor,
           exclude_archived: true,
         },

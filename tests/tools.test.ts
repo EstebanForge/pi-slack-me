@@ -15,8 +15,8 @@ afterEach(() => {
 
 function mockFetch(routes: Record<string, unknown>, status = 200) {
   return vi.fn().mockImplementation((url: string) => {
-    const u = new URL(url);
-    const method = u.pathname.replace("/api/", "");
+    const method = url.match(/\/api\/([^?]+)/)?.[1];
+    if (!method) throw new Error(`unexpected Slack URL: ${url}`);
     const body = routes[method];
     if (!body) throw new Error(`unexpected Slack call: ${method}`);
     return Promise.resolve({
@@ -52,15 +52,22 @@ describe("slack_list_channels", () => {
     expect(text).toContain("DM with U9");
   });
 
-  it("defaults types to include im/mpim", async () => {
+  it("defaults to public channels without requiring private-channel or DM scopes", async () => {
     const fetchMock = mockFetch({ "users.conversations": { ok: true, channels: [] } });
     vi.stubGlobal("fetch", fetchMock);
     const { listChannelsTool } = await import("../lib/tools/list-channels");
     await invoke(listChannelsTool, {});
     const url = fetchMock.mock.calls[0][0] as string;
-    expect(url).toContain("types=public_channel");
-    expect(url).toContain("im");
-    expect(url).toContain("mpim");
+    expect(url).toMatch(/[?&]types=public_channel(?:&|$)/);
+  });
+
+  it("preserves an explicit conversation-type filter", async () => {
+    const fetchMock = mockFetch({ "users.conversations": { ok: true, channels: [] } });
+    vi.stubGlobal("fetch", fetchMock);
+    const { listChannelsTool } = await import("../lib/tools/list-channels");
+    await invoke(listChannelsTool, { types: "im,mpim" });
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain("types=im%2Cmpim");
   });
 });
 
