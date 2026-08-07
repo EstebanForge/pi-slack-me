@@ -15,21 +15,32 @@ export function parseWatchedChannels(value: string | undefined): string[] {
 }
 
 export function formatListenerStatus(status: SlackListenerStatus): string {
-  if (status.unread > 0) return `Slack: ${status.unread} unread`;
+  if (status.state === "connected" && status.unread > 0) {
+    return `Slack: ${status.unread} unread`;
+  }
+
+  let state: string;
   switch (status.state) {
     case "connected":
-      return "Slack: connected";
+      state = "connected";
+      break;
     case "connecting":
-      return "Slack: connecting";
+      state = "connecting";
+      break;
     case "reconnecting":
-      return "Slack: reconnecting";
+      state = "reconnecting";
+      break;
     case "disconnected":
-      return "Slack: disconnected";
+      state = "disconnected";
+      break;
     case "error":
-      return "Slack: error";
+      state = "error";
+      break;
     default:
-      return "Slack: off";
+      state = "off";
   }
+  const unread = status.unread > 0 ? ` · ${status.unread} unread` : "";
+  return `Slack: ${state}${unread}`;
 }
 
 export function formatMentionNotification(message: SlackInboxMessage): string {

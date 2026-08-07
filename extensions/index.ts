@@ -23,7 +23,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
-import { LogLevel, SocketModeClient } from "@slack/socket-mode";
+import { LogLevel, SocketModeClient, type Logger } from "@slack/socket-mode";
 import { Container, SettingsList, Text, type SettingItem } from "@earendil-works/pi-tui";
 import { addReactionTool } from "../lib/tools/add-reaction";
 import { listChannelsTool } from "../lib/tools/list-channels";
@@ -76,12 +76,23 @@ export interface SlackMeDependencies {
   createSocketClient: (appToken: string) => SocketModeClientLike;
 }
 
+const silentSocketLogger: Logger = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+  setLevel: () => undefined,
+  getLevel: () => LogLevel.ERROR,
+  setName: () => undefined,
+};
+
 const defaultDependencies: SlackMeDependencies = {
   createSocketClient: (appToken) =>
     new SocketModeClient({
       appToken,
-      logLevel: LogLevel.ERROR,
-      clientOptions: { retryConfig: { retries: 0 } },
+      logger: silentSocketLogger,
+      autoReconnectEnabled: false,
+      clientOptions: { retryConfig: { retries: 0 }, timeout: 10_000 },
     }),
 };
 

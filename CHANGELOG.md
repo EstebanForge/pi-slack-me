@@ -33,8 +33,13 @@
 
 - Successful non-JSON Slack responses now surface as `SlackApiError` rather
   than leaking a raw JSON parser exception.
+- Socket reconnects are owned by the extension with caught exponential-backoff
+  retries, avoiding unhandled SDK reconnect failures.
+- Shutdown now waits for in-flight socket startup and prevents a connection from
+  opening after the listener has stopped.
+- Unhealthy connection states remain visible when the inbox has unread messages.
 - Socket connection errors redact app tokens and WebSocket URLs before they
-  reach pi notifications.
+  reach pi notifications, while raw SDK console logging is suppressed.
 
 ## 1.1.1 — 2026-08-06
 

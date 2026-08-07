@@ -55,6 +55,7 @@ describe("SlackEventListener", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     delete process.env.SLACK_USER_TOKEN;
   });
@@ -250,6 +251,59 @@ describe("SlackEventListener", () => {
     });
     expect(listener.status().unread).toBe(0);
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("retains user-authored thread broadcasts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("auth.test")) {
+          return slackResponse({ ok: true, user_id: "USELF" });
+        }
+        if (url.includes("users.info")) {
+          return slackResponse({ ok: true, user: { id: "UOTHER" } });
+        }
+        if (url.includes("conversations.info")) {
+          return slackResponse({
+            ok: true,
+            channel: { id: "C123", name: "engineering" },
+          });
+        }
+        throw new Error(`Unexpected Slack request: ${url}`);
+      }),
+    );
+
+    const socket = new FakeSocketClient();
+    const listener = new SlackEventListener({ socket });
+    await listener.start();
+
+    const event: SocketEvent = {
+      ack: vi.fn().mockResolvedValue(undefined),
+      body: {
+        event_id: "EvThreadBroadcast",
+        event: {
+          type: "message",
+          channel: "C123",
+          channel_type: "channel",
+          user: "UOTHER",
+          text: "<@USELF> this reply was also sent to the channel",
+          ts: "1786020000.000450",
+          subtype: "thread_broadcast",
+        },
+      },
+      event: undefined as never,
+    };
+    event.event = event.body.event;
+    socket.emit("message", event);
+
+    await vi.waitFor(() => expect(listener.status().unread).toBe(1));
+    expect(listener.readInbox(1)).toEqual([
+      expect.objectContaining({
+        eventId: "EvThreadBroadcast",
+        isMention: true,
+      }),
+    ]);
   });
 
   it("acknowledges Slack retries without duplicating the inbox message", async () => {
@@ -575,6 +629,45 @@ describe("SlackEventListener", () => {
     expect(socket.disconnect).toHaveBeenCalledOnce();
   });
 
+  it("retries dropped connections without leaking rejected reconnect attempts", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("auth.test")) {
+          return slackResponse({ ok: true, user_id: "USELF" });
+        }
+        throw new Error(`Unexpected Slack request: ${url}`);
+      }),
+    );
+
+    const socket = new FakeSocketClient();
+    socket.start
+      .mockResolvedValueOnce({ ok: true })
+      .mockRejectedValueOnce(new Error("network still unavailable"))
+      .mockResolvedValueOnce({ ok: true });
+    const onError = vi.fn();
+    const listener = new SlackEventListener({ socket, onError });
+    await listener.start();
+
+    socket.emit("disconnected");
+    expect(listener.status().state).toBe("reconnecting");
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(socket.start).toHaveBeenCalledTimes(2);
+    expect(onError).toHaveBeenCalledWith(
+      "Slack Socket Mode: network still unavailable",
+    );
+    expect(listener.status().state).toBe("reconnecting");
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(socket.start).toHaveBeenCalledTimes(3);
+    expect(listener.status().state).toBe("connected");
+
+    await listener.stop();
+  });
+
   it("continues after acknowledgement errors without exposing connection secrets", async () => {
     vi.stubGlobal(
       "fetch",
@@ -650,7 +743,7 @@ describe("SlackEventListener", () => {
     expect(listener.status().state).toBe("connected");
   });
 
-  it("remains stopped when shutdown races with startup", async () => {
+  it("waits for in-flight socket startup before shutdown completes", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string | URL | Request) => {
@@ -674,12 +767,45 @@ describe("SlackEventListener", () => {
 
     const starting = listener.start();
     await vi.waitFor(() => expect(socket.start).toHaveBeenCalledOnce());
-    const stopping = listener.stop();
+    let stopSettled = false;
+    const stopping = listener.stop().then(() => {
+      stopSettled = true;
+    });
+    await Promise.resolve();
+
+    expect(stopSettled).toBe(false);
     finishStart?.();
     await Promise.all([starting, stopping]);
 
     expect(listener.status().state).toBe("stopped");
-    expect(socket.disconnect).toHaveBeenCalled();
+    expect(socket.disconnect).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not open a socket when shutdown happens during authentication", async () => {
+    let finishAuth: (() => void) | undefined;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("auth.test")) {
+        await new Promise<void>((resolve) => {
+          finishAuth = resolve;
+        });
+        return slackResponse({ ok: true, user_id: "USELF" });
+      }
+      throw new Error(`Unexpected Slack request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const socket = new FakeSocketClient();
+    const listener = new SlackEventListener({ socket });
+
+    const starting = listener.start();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    await listener.stop();
+    finishAuth?.();
+    await starting;
+
+    expect(socket.start).not.toHaveBeenCalled();
+    expect(listener.status().state).toBe("stopped");
   });
 
   it("reports startup failures without exposing connection secrets", async () => {
