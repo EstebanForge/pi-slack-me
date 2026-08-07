@@ -5,6 +5,8 @@ const MAX_INBOX_MESSAGES = 100;
 const MAX_SEEN_EVENT_IDS = 1_000;
 const INITIAL_RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
+const MAX_RECONNECT_ATTEMPTS = 6;
+const STOP_TIMEOUT_MS = 5_000;
 
 function sanitizeSocketError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -119,6 +121,7 @@ export class SlackEventListener {
   private desiredRunning = false;
   private lifecycle = 0;
   private reconnectAttempts = 0;
+  private connectionErrorReported = false;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private startPromise?: Promise<void>;
   private socketStartPromise?: Promise<unknown>;
@@ -130,18 +133,18 @@ export class SlackEventListener {
     this.onMention = options.onMention;
     this.onError = options.onError;
     this.socket.on("message", (payload) => {
-      void this.receive(payload).catch((error) => this.reportError(error));
+      void this.receive(payload).catch((error) => {
+        if (this.desiredRunning) this.reportError(error);
+      });
     });
-    this.socket.on("error", (error) => {
-      this.reportError(error);
-      if (this.desiredRunning) this.setState("error");
-    });
+    this.socket.on("error", (error) => this.handleConnectionError(error));
     this.socket.on("reconnecting", () => {
       if (this.desiredRunning) this.setState("reconnecting");
     });
     this.socket.on("connected", () => {
       if (!this.desiredRunning) return;
       this.reconnectAttempts = 0;
+      this.connectionErrorReported = false;
       this.setState("connected");
     });
     this.socket.on("disconnected", () => {
@@ -161,6 +164,7 @@ export class SlackEventListener {
     this.desiredRunning = true;
     this.clearReconnectTimer();
     this.reconnectAttempts = 0;
+    this.connectionErrorReported = false;
     const lifecycle = ++this.lifecycle;
     this.setState("connecting");
     return this.beginConnect(lifecycle);
@@ -180,27 +184,32 @@ export class SlackEventListener {
     this.clearReconnectTimer();
     const activeSocketStart = this.socketStartPromise;
     let disconnectError: unknown;
-
-    try {
-      await this.socket.disconnect();
-    } catch (error) {
-      disconnectError = error;
-    }
-
-    if (activeSocketStart) {
-      try {
-        await activeSocketStart;
-      } catch {
-        // A manual disconnect normally rejects an in-flight start.
-      }
+    const disconnect = async (): Promise<void> => {
       try {
         await this.socket.disconnect();
       } catch (error) {
         disconnectError ??= error;
       }
-    }
+    };
+
+    const firstDisconnect = disconnect();
+    const finalDisconnect = activeSocketStart
+      ? activeSocketStart.catch(() => undefined).then(disconnect)
+      : Promise.resolve();
+    const cleanup = Promise.all([firstDisconnect, finalDisconnect]);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      cleanup.then(() => "closed" as const),
+      new Promise<"timed-out">((resolve) => {
+        timeout = setTimeout(() => resolve("timed-out"), STOP_TIMEOUT_MS);
+      }),
+    ]);
+    if (timeout) clearTimeout(timeout);
 
     this.setState("stopped");
+    if (outcome === "timed-out") {
+      throw new Error("Slack Socket Mode shutdown timed out.");
+    }
     if (disconnectError !== undefined) throw disconnectError;
   }
 
@@ -258,18 +267,31 @@ export class SlackEventListener {
 
       if (!this.desiredRunning || lifecycle !== this.lifecycle) return;
       this.reconnectAttempts = 0;
+      this.connectionErrorReported = false;
       this.setState("connected");
     } catch (error) {
       if (this.desiredRunning && lifecycle === this.lifecycle) {
-        this.setState("error");
-        this.reportError(error);
+        this.handleConnectionError(error);
       }
       throw error;
     }
   }
 
+  private handleConnectionError(error: unknown): void {
+    if (!this.desiredRunning) return;
+    this.setState("error");
+    if (this.connectionErrorReported) return;
+    this.connectionErrorReported = true;
+    this.reportError(error);
+  }
+
   private scheduleReconnect(): void {
     if (!this.desiredRunning || this.reconnectTimer || this.startPromise) return;
+    if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      this.desiredRunning = false;
+      this.setState("error");
+      return;
+    }
 
     const lifecycle = this.lifecycle;
     const exponent = Math.min(this.reconnectAttempts, 5);
@@ -303,6 +325,8 @@ export class SlackEventListener {
   private async receive(payload: unknown): Promise<void> {
     const envelope = payload as SocketModeMessage;
     await this.acknowledge(envelope);
+    if (!this.desiredRunning) return;
+    const lifecycle = this.lifecycle;
 
     const event = envelope.event;
     if (!isOrdinaryPublicMessage(event)) return;
@@ -314,14 +338,14 @@ export class SlackEventListener {
 
     const eventId = envelope.body?.event_id ?? `${event.channel}:${event.ts}`;
     if (!this.rememberEvent(eventId)) return;
-    await this.enqueue(event, eventId, isMention);
+    await this.enqueue(event, eventId, isMention, lifecycle);
   }
 
   private async acknowledge(envelope: SocketModeMessage): Promise<void> {
     try {
       await envelope.ack?.();
     } catch (error) {
-      this.reportError(error);
+      if (this.desiredRunning) this.reportError(error);
     }
   }
 
@@ -340,11 +364,14 @@ export class SlackEventListener {
     event: OrdinaryPublicMessage,
     eventId: string,
     isMention: boolean,
+    lifecycle: number,
   ): Promise<void> {
     const [userName, channelName] = await Promise.all([
       this.resolveUserName(event.user),
       this.resolveChannelName(event.channel),
     ]);
+    if (!this.desiredRunning || lifecycle !== this.lifecycle) return;
+
     const message: StoredInboxMessage = {
       eventId,
       channelId: event.channel,

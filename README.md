@@ -39,7 +39,7 @@ Setting `SLACK_APP_TOKEN` enables a session-scoped connection through Slack's of
 
 It ignores your own posts, bot and system messages, edits, deletes, private channels, and DMs. Mentions produce a toast containing the author, channel, and a short preview. Non-mention messages from watched channels only update the `Slack: N unread` footer.
 
-Connection loss is retried with bounded exponential backoff. The footer keeps `reconnecting`, `disconnected`, or `error` visible alongside any unread count, and raw Socket Mode SDK logging is suppressed so temporary WebSocket tickets do not reach the console.
+Connection loss is retried up to six times with capped exponential backoff. After the final failure the footer stays at `Slack: error`; run `/slack listen on` to try again. The footer keeps `reconnecting`, `disconnected`, or `error` visible alongside any unread count, and raw Socket Mode SDK logging is suppressed so temporary WebSocket tickets do not reach the console.
 
 The safety boundary is explicit:
 

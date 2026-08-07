@@ -426,8 +426,15 @@ function registerSlackMe(
             return;
           }
           if (action === "off") {
-            await current.stop();
-            ctx.ui.notify("Slack Socket Mode stopped.", "info");
+            try {
+              await current.stop();
+              ctx.ui.notify("Slack Socket Mode stopped.", "info");
+            } catch {
+              ctx.ui.notify(
+                "Slack Socket Mode failed to stop cleanly.",
+                "warning",
+              );
+            }
             return;
           }
           ctx.ui.notify("Usage: /slack listen status|on|off", "warning");
