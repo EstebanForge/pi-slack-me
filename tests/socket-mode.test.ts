@@ -629,6 +629,42 @@ describe("SlackEventListener", () => {
     expect(socket.disconnect).toHaveBeenCalledOnce();
   });
 
+  it("force-closes a socket whose first disconnect does not settle", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("auth.test")) {
+          return slackResponse({ ok: true, user_id: "USELF" });
+        }
+        throw new Error(`Unexpected Slack request: ${url}`);
+      }),
+    );
+
+    let finishFirstDisconnect: (() => void) | undefined;
+    const socket = new FakeSocketClient();
+    socket.disconnect
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishFirstDisconnect = () => resolve(undefined);
+          }),
+      )
+      .mockImplementationOnce(async () => finishFirstDisconnect?.());
+    const listener = new SlackEventListener({ socket });
+    await listener.start();
+
+    vi.useFakeTimers();
+    const stopping = listener.stop();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(socket.disconnect).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(1);
+    await stopping;
+    expect(socket.disconnect).toHaveBeenCalledTimes(2);
+    expect(listener.status().state).toBe("stopped");
+  });
+
   it("retries dropped connections without leaking rejected reconnect attempts", async () => {
     vi.useFakeTimers();
     vi.stubGlobal(
@@ -703,8 +739,59 @@ describe("SlackEventListener", () => {
     expect(onError).toHaveBeenCalledOnce();
     expect(listener.status().state).toBe("error");
 
+    socket.emit("disconnected");
+    expect(listener.status().state).toBe("error");
     await vi.advanceTimersByTimeAsync(120_000);
     expect(socket.start).toHaveBeenCalledTimes(7);
+    await listener.stop();
+  });
+
+  it("times out stalled socket reconnects before continuing backoff", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("auth.test")) {
+          return slackResponse({ ok: true, user_id: "USELF" });
+        }
+        throw new Error(`Unexpected Slack request: ${url}`);
+      }),
+    );
+
+    let rejectStalledStart: ((error: Error) => void) | undefined;
+    const socket = new FakeSocketClient();
+    socket.start
+      .mockResolvedValueOnce({ ok: true })
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectStalledStart = reject;
+          }),
+      )
+      .mockResolvedValueOnce({ ok: true });
+    socket.disconnect.mockImplementation(async () => {
+      rejectStalledStart?.(new Error("disconnected"));
+      rejectStalledStart = undefined;
+    });
+    const onError = vi.fn();
+    const listener = new SlackEventListener({ socket, onError });
+    await listener.start();
+
+    socket.emit("disconnected");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(socket.start).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith(
+      "Slack Socket Mode: connection timed out.",
+    );
+    expect(listener.status().state).toBe("reconnecting");
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(socket.start).toHaveBeenCalledTimes(3);
+    expect(listener.status().state).toBe("connected");
     await listener.stop();
   });
 
@@ -862,12 +949,14 @@ describe("SlackEventListener", () => {
     let finishStart: (() => void) | undefined;
     let finishDisconnect: (() => void) | undefined;
     const socket = new FakeSocketClient();
-    socket.start.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          finishStart = () => resolve({ ok: true });
-        }),
-    );
+    socket.start
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishStart = () => resolve({ ok: true });
+          }),
+      )
+      .mockResolvedValue({ ok: true });
     socket.disconnect
       .mockImplementationOnce(
         () =>
@@ -889,10 +978,19 @@ describe("SlackEventListener", () => {
     await vi.advanceTimersByTimeAsync(5_000);
     await rejection;
     expect(listener.status().state).toBe("stopped");
+    await expect(listener.start()).rejects.toThrow(
+      "Slack Socket Mode is still shutting down.",
+    );
+    expect(socket.start).toHaveBeenCalledOnce();
 
     finishStart?.();
     finishDisconnect?.();
     await starting;
+
+    await listener.start();
+    expect(socket.start).toHaveBeenCalledTimes(2);
+    expect(listener.status().state).toBe("connected");
+    await listener.stop();
   });
 
   it("does not open a socket when shutdown happens during authentication", async () => {

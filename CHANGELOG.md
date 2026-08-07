@@ -34,8 +34,8 @@
 - Successful non-JSON Slack responses now surface as `SlackApiError` rather
   than leaking a raw JSON parser exception.
 - Socket reconnects are owned by the extension with caught exponential-backoff
-  retries, avoiding unhandled SDK reconnect failures. Attempts stop after six,
-  and repeated connection errors produce one warning per outage.
+  retries, avoiding unhandled SDK reconnect failures. Attempts time out after
+  10 seconds, stop after six, and produce one warning per outage.
 - Shutdown now waits for in-flight socket startup, drops messages received after
   shutdown begins, and times out cleanly if the transport never settles.
 - Unhealthy connection states remain visible when the inbox has unread messages.

@@ -419,10 +419,21 @@ function registerSlackMe(
           if (action === "on") {
             try {
               await current.start();
-            } catch {
+            } catch (error) {
+              if (
+                error instanceof Error &&
+                error.message === "Slack Socket Mode is still shutting down."
+              ) {
+                ctx.ui.notify(
+                  `${error.message} Try again shortly; restart pi if it persists.`,
+                  "warning",
+                );
+              }
               return;
             }
-            ctx.ui.notify("Slack Socket Mode connected.", "info");
+            if (current.status().state === "connected") {
+              ctx.ui.notify("Slack Socket Mode connected.", "info");
+            }
             return;
           }
           if (action === "off") {

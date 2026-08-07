@@ -6,7 +6,37 @@ const MAX_SEEN_EVENT_IDS = 1_000;
 const INITIAL_RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const MAX_RECONNECT_ATTEMPTS = 6;
+const SOCKET_START_TIMEOUT_MS = 10_000;
+const DISCONNECT_RETRY_DELAY_MS = 1_000;
 const STOP_TIMEOUT_MS = 5_000;
+
+type TimeoutResult<T> =
+  | { timedOut: true }
+  | { timedOut: false; value: T };
+
+async function completionResult<T>(
+  promise: Promise<T>,
+): Promise<TimeoutResult<T>> {
+  const value = await promise;
+  return { timedOut: false, value };
+}
+
+async function waitWithTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<TimeoutResult<T>> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      completionResult(promise),
+      new Promise<{ timedOut: true }>((resolve) => {
+        timeout = setTimeout(() => resolve({ timedOut: true }), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
 function sanitizeSocketError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -124,6 +154,7 @@ export class SlackEventListener {
   private connectionErrorReported = false;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private startPromise?: Promise<void>;
+  private stopPromise?: Promise<void>;
   private socketStartPromise?: Promise<unknown>;
 
   constructor(options: SlackEventListenerOptions) {
@@ -158,8 +189,25 @@ export class SlackEventListener {
   }
 
   start(): Promise<void> {
-    if (this.state === "connected") return Promise.resolve();
-    if (this.startPromise) return this.startPromise;
+    if (this.stopPromise) {
+      return Promise.reject(
+        new Error("Slack Socket Mode is still shutting down."),
+      );
+    }
+    if (this.state === "connected" && this.desiredRunning) {
+      return Promise.resolve();
+    }
+    if (this.startPromise) {
+      if (this.desiredRunning) return this.startPromise;
+      return Promise.reject(
+        new Error("Slack Socket Mode is still shutting down."),
+      );
+    }
+    if (this.socketStartPromise) {
+      return Promise.reject(
+        new Error("Slack Socket Mode is still shutting down."),
+      );
+    }
 
     this.desiredRunning = true;
     this.clearReconnectTimer();
@@ -170,7 +218,19 @@ export class SlackEventListener {
     return this.beginConnect(lifecycle);
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
+
+    const stopPromise = this.performStop();
+    this.stopPromise = stopPromise;
+    const clearStopPromise = () => {
+      if (this.stopPromise === stopPromise) this.stopPromise = undefined;
+    };
+    void stopPromise.then(clearStopPromise, clearStopPromise);
+    return stopPromise;
+  }
+
+  private async performStop(): Promise<void> {
     if (
       this.state === "stopped" &&
       !this.startPromise &&
@@ -193,21 +253,31 @@ export class SlackEventListener {
     };
 
     const firstDisconnect = disconnect();
-    const finalDisconnect = activeSocketStart
-      ? activeSocketStart.catch(() => undefined).then(disconnect)
-      : Promise.resolve();
-    const cleanup = Promise.all([firstDisconnect, finalDisconnect]);
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const outcome = await Promise.race([
-      cleanup.then(() => "closed" as const),
-      new Promise<"timed-out">((resolve) => {
-        timeout = setTimeout(() => resolve("timed-out"), STOP_TIMEOUT_MS);
-      }),
+    const retryDisconnect = (async (): Promise<void> => {
+      const outcome = await waitWithTimeout(
+        firstDisconnect,
+        DISCONNECT_RETRY_DELAY_MS,
+      );
+      if (outcome.timedOut) await disconnect();
+    })();
+    const finalDisconnect = (async (): Promise<void> => {
+      if (!activeSocketStart) return;
+      try {
+        await activeSocketStart;
+      } catch {
+        // Disconnection commonly rejects an in-flight socket start.
+      }
+      await disconnect();
+    })();
+    const cleanup = Promise.all([
+      firstDisconnect,
+      retryDisconnect,
+      finalDisconnect,
     ]);
-    if (timeout) clearTimeout(timeout);
+    const outcome = await waitWithTimeout(cleanup, STOP_TIMEOUT_MS);
 
     this.setState("stopped");
-    if (outcome === "timed-out") {
+    if (outcome.timedOut) {
       throw new Error("Slack Socket Mode shutdown timed out.");
     }
     if (disconnectError !== undefined) throw disconnectError;
@@ -255,15 +325,7 @@ export class SlackEventListener {
       }
       if (!this.desiredRunning || lifecycle !== this.lifecycle) return;
 
-      const socketStart = this.socket.start();
-      this.socketStartPromise = socketStart;
-      try {
-        await socketStart;
-      } finally {
-        if (this.socketStartPromise === socketStart) {
-          this.socketStartPromise = undefined;
-        }
-      }
+      await this.startSocket();
 
       if (!this.desiredRunning || lifecycle !== this.lifecycle) return;
       this.reconnectAttempts = 0;
@@ -274,6 +336,47 @@ export class SlackEventListener {
         this.handleConnectionError(error);
       }
       throw error;
+    }
+  }
+
+  private async startSocket(): Promise<void> {
+    const socketStart = this.socket.start();
+    this.socketStartPromise = socketStart;
+    const trackedSocketStart = this.trackSocketStart(socketStart);
+    const outcome = await waitWithTimeout(
+      socketStart,
+      SOCKET_START_TIMEOUT_MS,
+    );
+    if (!outcome.timedOut) return;
+
+    const cleanup = Promise.all([
+      trackedSocketStart,
+      this.disconnectSocketIgnoringError(),
+    ]);
+    const cleanupOutcome = await waitWithTimeout(cleanup, STOP_TIMEOUT_MS);
+    if (cleanupOutcome.timedOut) {
+      this.reconnectAttempts = MAX_RECONNECT_ATTEMPTS;
+    }
+    throw new Error("connection timed out.");
+  }
+
+  private async trackSocketStart(socketStart: Promise<unknown>): Promise<void> {
+    try {
+      await socketStart;
+    } catch {
+      // The caller handles the connection failure.
+    } finally {
+      if (this.socketStartPromise === socketStart) {
+        this.socketStartPromise = undefined;
+      }
+    }
+  }
+
+  private async disconnectSocketIgnoringError(): Promise<void> {
+    try {
+      await this.socket.disconnect();
+    } catch {
+      // The connection timeout remains the actionable failure.
     }
   }
 
@@ -288,7 +391,6 @@ export class SlackEventListener {
   private scheduleReconnect(): void {
     if (!this.desiredRunning || this.reconnectTimer || this.startPromise) return;
     if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      this.desiredRunning = false;
       this.setState("error");
       return;
     }
