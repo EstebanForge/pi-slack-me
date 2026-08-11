@@ -81,7 +81,8 @@ describe("slack_post_message", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { ctx, editor } = ctxWith({ editorResult: "final text" });
     const { postMessageTool } = await import("../lib/tools/post-message");
-    const text = firstText(await invokeWithCtx(postMessageTool, { channel: "C1", text: "draft" }, ctx));
+    const result = await invokeWithCtx(postMessageTool, { channel: "C1", text: "draft" }, ctx);
+    const text = firstText(result);
     expect(text).toContain("C1");
     expect(text).toContain("100.0002");
     // The editor opened with the drafted text.
@@ -89,6 +90,12 @@ describe("slack_post_message", () => {
     // The POST body used the EDITED text, not the draft.
     const sent = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(sent).toEqual({ channel: "C1", text: "final text" });
+    // The success result tells the agent exactly what shipped and that the
+    // user changed the draft, so later turns do not trust the original wording.
+    expect(text).toContain("Edited by user: yes");
+    expect(text).toContain("Final content sent:");
+    expect(text).toContain("final text");
+    expect(result.details).toMatchObject({ postedContent: "final text", edited: true });
   });
 
   it("sends the edited text through unchanged when the user did not edit", async () => {

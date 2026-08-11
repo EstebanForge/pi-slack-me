@@ -27,7 +27,7 @@ interface RepliesResponse {
   response_metadata?: { next_cursor?: string };
 }
 
-export const readThreadTool: ToolDefinition<typeof Params, undefined> = {
+export const readThreadTool: ToolDefinition<typeof Params, SlackDetails> = {
   name: "slack_read_thread",
   label: READ_THREAD_TITLE,
   description: READ_THREAD_DESCRIPTION,

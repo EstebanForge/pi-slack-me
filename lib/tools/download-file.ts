@@ -29,7 +29,7 @@ const TMP_DIR = join(tmpdir(), "pi-slack-me");
 // Download a shared file to a temp dir and return the local path. Slack stores
 // files at url_private / url_private_download, both requiring the bearer token.
 // We preserve the original extension so the `read` tool picks the right viewer.
-export const downloadFileTool: ToolDefinition<typeof Params, undefined> = {
+export const downloadFileTool: ToolDefinition<typeof Params, SlackDetails> = {
   name: "slack_download_file",
   label: DOWNLOAD_FILE_TITLE,
   description: DOWNLOAD_FILE_DESCRIPTION,

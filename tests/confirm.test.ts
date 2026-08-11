@@ -54,6 +54,8 @@ describe("confirmWrite gate", () => {
     });
     expect(out.proceed).toBe(true);
     expect(out.text).toBe("draft");
+    // Fast path: no dialog opened, so the draft cannot have been edited.
+    expect(out.edited).toBe(false);
     expect(editor).not.toHaveBeenCalled();
     expect(confirm).not.toHaveBeenCalled();
   });
@@ -68,8 +70,23 @@ describe("confirmWrite gate", () => {
     });
     expect(out.proceed).toBe(true);
     expect(out.text).toBe("trimmed draft");
+    // The user changed the draft in the dialog, so edited must be true.
+    expect(out.edited).toBe(true);
     expect(editor).toHaveBeenCalledWith("Send message?", "verbose draft");
     expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("editable path: editor() returning the prefill unchanged -> edited=false", async () => {
+    setConfirmWriteEnabled(true);
+    const { ctx } = mockCtx({ editorResult: "draft" });
+    const out = await confirmWrite(ctx, {
+      title: "t",
+      editableText: "draft",
+      summary: "s",
+    });
+    expect(out.proceed).toBe(true);
+    expect(out.text).toBe("draft");
+    expect(out.edited).toBe(false);
   });
 
   it("editable path: editor() cancel (undefined) aborts the write", async () => {
@@ -133,6 +150,8 @@ describe("confirmWrite headless guard (independent of review flag)", () => {
     const out = await confirmWrite(ctx, { title: "t", editableText: "draft", summary: "s" });
     expect(out.proceed).toBe(true);
     expect(out.text).toBe("draft");
+    // Headless fast path: no human reviewed it, so edited is false.
+    expect(out.edited).toBe(false);
     expect(editor).not.toHaveBeenCalled();
   });
 

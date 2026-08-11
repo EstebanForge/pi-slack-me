@@ -139,6 +139,13 @@ export interface ConfirmWriteOptions {
   /** Readable payload preview, shown by confirm() in the non-editable path. */
   summary: string;
   /**
+   * Optional normalizer applied to BOTH the editor return and the prefill
+   * before the `edited` flag is computed. Pass the same transformation the
+   * tool applies just before transmission, so a whitespace-only edit that is
+   * stripped before sending does NOT count as edited. Default is identity.
+   */
+  normalize?: (text: string) => string;
+  /**
    * Force the gate regardless of the review flag, AND block when no interactive
    * UI is available. Use for irreversible/destructive writes (deletes). A forced
    * write is ALWAYS blocked in headless mode (no opt-in); a non-forced write in
@@ -151,6 +158,12 @@ export interface ConfirmOutcome {
   proceed: boolean;
   /** Final text to send. Equals the (possibly edited) text in the editable path. */
   text?: string;
+  /**
+   * True when the human changed the agent's draft in the review dialog. Lets a
+   * write tool tell the agent its original wording was NOT what shipped. Only
+   * meaningful when `proceed` is true; unset on cancel/refuse paths.
+   */
+  edited?: boolean;
 }
 
 /**
@@ -179,20 +192,27 @@ export async function confirmWrite(
     if (forced) return { proceed: false };
     // Non-destructive writes need the explicit headless opt-in to proceed.
     if (!getAllowHeadlessWriteEnabled()) return { proceed: false };
-    return { proceed: true, text: opts.editableText };
+    // No human reviewed this, so the draft cannot have been edited.
+    return { proceed: true, text: opts.editableText, edited: false };
   }
 
   // 2. REVIEW gate (interactive UI present). Forced writes ignore the flag
   //    (they always need a human yes/no). Non-forced writes skip the review
   //    entirely when slack-confirm-write is off.
   if (!forced && !getConfirmWriteEnabled()) {
-    return { proceed: true, text: opts.editableText };
+    // Gate off: the dialog never opened, so the draft is unchanged.
+    return { proceed: true, text: opts.editableText, edited: false };
   }
 
   if (opts.editableText !== undefined) {
     const edited = await ctx.ui.editor(opts.title, opts.editableText);
     if (edited === undefined) return { proceed: false };
-    return { proceed: true, text: edited };
+    const norm = opts.normalize ?? ((s: string) => s);
+    return {
+      proceed: true,
+      text: edited,
+      edited: norm(edited) !== norm(opts.editableText),
+    };
   }
 
   const ok = await ctx.ui.confirm(opts.title, opts.summary);

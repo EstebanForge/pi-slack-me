@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.2 — 2026-08-11
+
+### Added
+- **Write tools report the actual posted content and an `edited` flag.** `slack_post_message` and `slack_update_message` append a labeled "Edited by user: yes|no / Final content sent" block to the success result, so the agent's later turns know exactly what reached Slack and whether the human changed the draft in the review dialog. The content is also mirrored into structured `details` as `{ postedContent, edited }`. Previously these tools returned only the timestamp and channel, so after an edit the agent had no record of what actually shipped.
+
 ## 1.1.1 — 2026-08-06
 
 ### Changed

@@ -25,7 +25,7 @@ interface ChatDeleteResponse {
   ts?: string;
 }
 
-export const deleteMessageTool: ToolDefinition<typeof Params, undefined> = {
+export const deleteMessageTool: ToolDefinition<typeof Params, SlackDetails> = {
   name: "slack_delete_message",
   label: DELETE_MESSAGE_TITLE,
   description: DELETE_MESSAGE_DESCRIPTION,

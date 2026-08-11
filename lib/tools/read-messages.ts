@@ -29,7 +29,7 @@ interface HistoryResponse {
   response_metadata?: { next_cursor?: string };
 }
 
-export const readMessagesTool: ToolDefinition<typeof Params, undefined> = {
+export const readMessagesTool: ToolDefinition<typeof Params, SlackDetails> = {
   name: "slack_read_messages",
   label: READ_MESSAGES_TITLE,
   description: READ_MESSAGES_DESCRIPTION,

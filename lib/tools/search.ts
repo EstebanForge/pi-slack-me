@@ -27,7 +27,7 @@ interface SearchResponse {
   messages?: SlackSearchResult;
 }
 
-export const searchTool: ToolDefinition<typeof Params, undefined> = {
+export const searchTool: ToolDefinition<typeof Params, SlackDetails> = {
   name: "slack_search",
   label: SEARCH_TITLE,
   description: SEARCH_DESCRIPTION,

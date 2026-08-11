@@ -30,7 +30,7 @@ interface ListResponse {
   response_metadata?: { next_cursor?: string };
 }
 
-export const listChannelsTool: ToolDefinition<typeof Params, undefined> = {
+export const listChannelsTool: ToolDefinition<typeof Params, SlackDetails> = {
   name: "slack_list_channels",
   label: LIST_CHANNELS_TITLE,
   description: LIST_CHANNELS_DESCRIPTION,
