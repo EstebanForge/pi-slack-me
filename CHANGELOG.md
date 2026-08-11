@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.3 — 2026-08-11
+
+### Changed
+- **Write-tool results no longer echo the posted content when the draft was not edited.** The content block and `details` are now emitted only when the human changed the draft in the review dialog. When the draft shipped verbatim the agent already has that text in its own context, so echoing it duplicated tokens for no information gain. The success line stays terse (e.g. `Slack: message sent to C1 (ts: 123.45).`).
+
 ## 1.1.2 — 2026-08-11
 
 ### Added

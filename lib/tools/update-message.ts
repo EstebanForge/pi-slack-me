@@ -2,7 +2,7 @@ import { Type, type Static } from "typebox";
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { slackPost, SlackApiError } from "../api";
 import { confirmWrite, summarizeUpdateMessage } from "../confirm";
-import { toToolResult, errorText, postedContentBlock, type SlackDetails } from "../result";
+import { toToolResult, errorText, postedContentExtras, type SlackDetails } from "../result";
 import {
   UPDATE_MESSAGE_TITLE,
   UPDATE_MESSAGE_DESCRIPTION,
@@ -63,10 +63,10 @@ export const updateMessageTool: ToolDefinition<typeof Params, SlackDetails> = {
       await slackPost<ChatUpdateResponse>("chat.update", {
         body: { channel: params.channel, ts: params.ts, text },
       });
-      const edited = decision.edited ?? false;
+      const { extraText, details } = postedContentExtras(text, decision.edited ?? false);
       return toToolResult(
-        `Slack: message ${params.ts} updated in ${params.channel}.${postedContentBlock(text, edited)}`,
-        { postedContent: text, edited },
+        `Slack: message ${params.ts} updated in ${params.channel}.${extraText}`,
+        details,
       );
     } catch (err) {
       if (err instanceof SlackApiError && err.code === "cant_update_message") {

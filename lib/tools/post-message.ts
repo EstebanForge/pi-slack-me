@@ -2,7 +2,7 @@ import { Type, type Static } from "typebox";
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { slackPost, SlackApiError } from "../api";
 import { confirmWrite, summarizePostMessage } from "../confirm";
-import { toToolResult, errorText, postedContentBlock, type SlackDetails } from "../result";
+import { toToolResult, errorText, postedContentExtras, type SlackDetails } from "../result";
 import {
   POST_MESSAGE_TITLE,
   POST_MESSAGE_DESCRIPTION,
@@ -104,10 +104,10 @@ export const postMessageTool: ToolDefinition<typeof Params, SlackDetails> = {
       const resp = await slackPost<ChatPostResponse>("chat.postMessage", { body });
       const kind = params.thread_ts ? "threaded reply" : "message";
       const where = params.to_user ? `@${params.to_user} (DM ${channel})` : channel;
-      const edited = decision.edited ?? false;
+      const { extraText, details } = postedContentExtras(text, decision.edited ?? false);
       return toToolResult(
-        `Slack: ${kind} sent to ${where} (ts: ${resp.ts ?? "(unknown)"}).${postedContentBlock(text, edited)}`,
-        { postedContent: text, edited },
+        `Slack: ${kind} sent to ${where} (ts: ${resp.ts ?? "(unknown)"}).${extraText}`,
+        details,
       );
     } catch (err) {
       if (err instanceof SlackApiError && err.isAuthError) {

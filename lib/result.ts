@@ -1,11 +1,11 @@
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 
-// Structured metadata a write tool can attach so the host (and future
-// programmatic callers) can read the exact bytes that reached the Slack Web
-// API and whether the human changed the agent's draft. The model itself only
-// sees a tool result's `content` text (structured `details` is host metadata),
-// so the ground truth is ALSO echoed into the result text via
-// postedContentBlock().
+// Structured metadata a write tool attaches ONLY when the human edited the
+// draft in the review dialog. postedContentExtras() emits this object plus a
+// matching text block; when the draft shipped verbatim it emits neither,
+// because the agent already holds its own draft in context. The model only
+// sees a tool result's `content` text, so the same ground truth is also
+// appended to the success line as prose.
 export interface WriteDetails {
   /** Exact text transmitted to Slack after the user reviewed/edited. */
   postedContent?: string;
@@ -27,12 +27,24 @@ export function toToolResult(
   };
 }
 
-// Block appended to a write-tool success line so the agent's later turns see
-// EXACTLY what reached Slack, plus whether the user edited the draft. Without
-// this the agent keeps believing its own original draft was posted verbatim,
-// even after the user changed it in the review dialog.
-export function postedContentBlock(text: string, edited: boolean): string {
-  return `\nEdited by user: ${edited ? "yes" : "no"}\nFinal content sent:\n-----\n${text}\n-----`;
+/**
+ * Success-result extras for a write tool: a model-visible content block plus
+ * structured details, returned ONLY when the human actually edited the draft.
+ * When the draft shipped verbatim the agent already holds that text in its own
+ * context, so echoing it back would duplicate tokens for no information gain.
+ *
+ * `extraText` is appended to the success line; `details` is attached to the
+ * result. Both are empty/undefined in the not-edited case.
+ */
+export function postedContentExtras(text: string, edited: boolean): {
+  extraText: string;
+  details: WriteDetails | undefined;
+} {
+  if (!edited) return { extraText: "", details: undefined };
+  return {
+    extraText: `\nEdited by user: yes\nFinal content sent:\n-----\n${text}\n-----`,
+    details: { postedContent: text, edited: true },
+  };
 }
 
 // Single error formatter shared across every tool. All Slack errors (auth,
