@@ -107,7 +107,7 @@ No `/invite` step. No bot in any channel. The token reads as your user.
 ## Install
 
 ```bash
-pi install @estebanforge/pi-slack-me
+pi install npm:@estebanforge/pi-slack-me
 ```
 
 ## Commands
