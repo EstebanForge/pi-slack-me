@@ -22,6 +22,8 @@ export interface SlackGetOptions {
 export interface SlackPostOptions {
   /** JSON body. Slack accepts application/json for write methods. */
   body?: Record<string, unknown>;
+  /** Form-encoded body for methods that reject JSON (files.getUploadURLExternal). */
+  form?: Record<string, string>;
   query?: Record<string, string | number | boolean | undefined>;
 }
 
@@ -158,10 +160,13 @@ export async function slackGet<T = SlackResponse>(
   }
 }
 
-// Call a Slack Web API method via POST with a JSON body. Used by the write
-// tools (chat.postMessage / chat.update / chat.delete). Same response parsing
-// and error handling as slackGet. `body` is sent as application/json; Slack
-// accepts JSON for all write methods.
+// Call a Slack Web API method via POST. Used by the write tools
+// (chat.postMessage / chat.update / chat.delete) and the image upload flow.
+// `body` is sent as application/json; `form` is sent as
+// application/x-www-form-urlencoded - the upload-ticket methods claim JSON
+// support in the docs but reject it live (invalid_arguments, probed
+// 2026-09-05), so files.getUploadURLExternal/completeUploadExternal go
+// through `form`. Same response parsing and error handling either way.
 export async function slackPost<T = SlackResponse>(
   method: string,
   options: SlackPostOptions = {},
@@ -177,6 +182,9 @@ export async function slackPost<T = SlackResponse>(
   if (options.body !== undefined) {
     headers["Content-Type"] = "application/json; charset=utf-8";
     body = JSON.stringify(options.body);
+  } else if (options.form !== undefined) {
+    headers["Content-Type"] = "application/x-www-form-urlencoded";
+    body = new URLSearchParams(options.form).toString();
   }
 
   const controller = new AbortController();
@@ -199,6 +207,40 @@ export async function slackPost<T = SlackResponse>(
     return await readSlackJson<T>(method, response);
   } finally {
     clearTimeout(timer);
+  }
+}
+
+// Upload raw file bytes to a presigned upload URL from
+// files.getUploadURLExternal. No Authorization header on purpose: the URL is
+// single-use and pre-authorized, and adding a Bearer header can break the
+// signature check. HTTP status is the only success signal Slack gives here;
+// a non-2xx carries the failure detail in the body, which we surface verbatim
+// (trimmed) so workspace upload restrictions stay diagnosable.
+export async function slackUploadBytes(
+  uploadUrl: string,
+  bytes: Buffer,
+  contentType: string,
+): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(uploadUrl, {
+      method: "POST",
+      headers: { "Content-Type": contentType },
+      body: new Uint8Array(bytes),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    throw new SlackApiError(transportError("file upload", err));
+  }
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => "")).slice(0, 200);
+    throw new SlackApiError(
+      `Slack file upload failed (HTTP ${response.status}).${detail ? ` ${detail}` : ""}`,
+      response.status,
+    );
   }
 }
 
@@ -241,10 +283,12 @@ function transportError(method: string, err: unknown): string {
 // The OAuth scope a given Web API method needs (user token). Used to make the
 // missing_scope error point at the RIGHT scope instead of a hardcoded one.
 // chat.* methods are all chat:write; opening a DM (conversations.open) needs
-// im:write, which is easy to miss when adding DM support.
+// im:write, which is easy to miss when adding DM support; the whole file
+// upload flow (getUploadURLExternal / completeUploadExternal) needs files:write.
 function requiredScopeFor(method: string): string {
   if (method.startsWith("chat.")) return "chat:write";
   if (method === "conversations.open") return "im:write";
+  if (method.startsWith("files.") && method !== "files.info") return "files:write";
   return "a required scope";
 }
 

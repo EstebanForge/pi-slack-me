@@ -91,7 +91,7 @@ export const DOWNLOAD_FILE_ID_DESCRIPTION =
 
 export const POST_MESSAGE_TITLE = "Slack: Post Message";
 
-export const POST_MESSAGE_DESCRIPTION = `Post a message to a Slack channel, group DM, or existing DM as the calling user. Posts as YOU (user token), not a bot. The message opens in an editable review dialog before sending when the slack-confirm-write flag is on (default): you can trim or rewrite the text, or cancel. Provide EITHER channel (a channel/DM/group ID) OR to_user (a user ID like U0123ABC456 to DM someone). Providing both is an error. Set thread_ts to post as a threaded reply instead of a top-level message. Note: posting to a channel needs the chat:write scope; DM-ing via to_user also needs im:write (for conversations.open).`;
+export const POST_MESSAGE_DESCRIPTION = `Post a message to a Slack channel, group DM, or existing DM as the calling user. Posts as YOU (user token), not a bot. The message opens in an editable review dialog before sending when the slack-confirm-write flag is on (default): you can trim or rewrite the text, or cancel. Provide EITHER channel (a channel/DM/group ID) OR to_user (a user ID like U0123ABC456 to DM someone). Providing both is an error. Set thread_ts to post as a threaded reply instead of a top-level message. Attach local images with images (png/jpg/gif/webp/bmp/svg); the message then posts as one file-share message and needs the files:write scope. Note: posting to a channel needs the chat:write scope; DM-ing via to_user also needs im:write (for conversations.open).`;
 
 export const POST_MESSAGE_CHANNEL_DESCRIPTION =
   "Channel ID (C...), private channel ID, DM ID (D...), or group DM ID. Get it from slack_list_channels. Omit if using to_user instead.";
@@ -104,6 +104,9 @@ export const POST_MESSAGE_TEXT_DESCRIPTION =
 
 export const POST_MESSAGE_THREAD_TS_DESCRIPTION =
   "Timestamp of a parent message to reply in its thread instead of posting top-level. Find the parent's ts in a message's ts field.";
+
+export const POST_MESSAGE_IMAGES_DESCRIPTION =
+  "Local image file paths to attach (png, jpg, jpeg, gif, webp, bmp, svg). Each file uploads via the Slack upload API and the message posts as one file-share message with the text as its comment. Requires the files:write scope.";
 
 // -------------------------------------------------- update message --------
 

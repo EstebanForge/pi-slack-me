@@ -238,10 +238,14 @@ export function summarizePostMessage(args: {
   toUser?: string;
   threadTs?: string;
   text: string;
+  images?: string[];
 }): string {
   const target = describeTarget(args.channel, args.toUser);
   const thread = args.threadTs ? `  |  thread=${args.threadTs}` : "";
-  return `to: ${target}${thread}\n\n${oneLine(args.text)}`;
+  const images = args.images?.length
+    ? `  |  images: ${args.images.map((p) => p.split("/").pop()).join(", ")}`
+    : "";
+  return `to: ${target}${thread}${images}\n\n${oneLine(args.text)}`;
 }
 
 export function summarizeUpdateMessage(args: {

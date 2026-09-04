@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0 — 2026-09-05
+
+### Added
+- **Image attachments on `slack_post_message`.** New optional `images` param takes local file paths (png, jpg, jpeg, gif, webp, bmp, svg). The message posts as ONE file-share message with the text as its comment, threaded when `thread_ts` is set. Implementation: the modern Slack upload flow — `files.getUploadURLExternal` → raw byte POST to the presigned URL → `files.completeUploadExternal` with `channel_id` / `initial_comment` / `thread_ts`. `chat.postMessage` never runs in the image path, so the message exists exactly once; a failed upload aborts before completion and Slack discards the batch (no orphans, no half-sent message).
+- Paths are validated (exists + supported type) BEFORE the review dialog, so a doomed send never reaches the user. Missing-scope errors on the upload flow name `files:write` precisely.
+
+### Changed
+- **New scope requirement: `files:write`** (user token) for image attachments only. Existing installs must add it in the app config and re-install (README "Upgrading from a read-only install" steps apply). Posting without `images` is unchanged (`chat:write` only).
+
 ## 1.1.3 — 2026-08-11
 
 ### Changed

@@ -21,7 +21,7 @@ The tradeoff, per Slack's docs: the app shows an OAuth consent screen the first 
 | `slack_read_thread` | Read all replies in a thread (`conversations.replies`) |
 | `slack_search` | Full-text search across the workspace (`search.messages`) |
 | `slack_download_file` | Download a shared file/image to a temp dir (`files.info` + download) |
-| `slack_post_message` | Post a message to a channel, group DM, or existing DM as you; DM by user ID (`chat.postMessage` + `conversations.open`) |
+| `slack_post_message` | Post a message to a channel, group DM, or existing DM as you; DM by user ID (`chat.postMessage` + `conversations.open`); attach local images with `images` (`files.getUploadURLExternal` + `files.completeUploadExternal`) |
 | `slack_update_message` | Edit the text of a message you previously posted (`chat.update`) |
 | `slack_delete_message` | Permanently delete one of your messages; always confirmed (`chat.delete`) |
 
@@ -69,10 +69,11 @@ In the left sidebar → **OAuth & Permissions** → scroll to **User Token Scope
 | `files:read` | download shared files (`slack_download_file`) |
 | `chat:write` | **post / update / delete messages as you** (`slack_post_message`, `slack_update_message`, `slack_delete_message`) |
 | `im:write` | **DM someone via `to_user`** (`slack_post_message` opens the DM via `conversations.open`; not needed for posting to an existing channel/group DM) |
+| `files:write` | **attach images via the `images` param** (`slack_post_message` uploads via `files.getUploadURLExternal` + `files.completeUploadExternal`; not needed for text-only posts) |
 
 No Bot Token Scopes are needed. There is no bot.
 
-> **Scope at a glance:** `chat:write` covers posting, editing, and deleting. Add `im:write` only if you use `to_user` (DM a user by ID). Reading needs the `*:read` / `*:history` scopes above.
+> **Scope at a glance:** `chat:write` covers posting, editing, and deleting. Add `im:write` only if you use `to_user` (DM a user by ID). Add `files:write` only if you attach images. Reading needs the `*:read` / `*:history` scopes above.
 
 #### Upgrading from a read-only install (v1.x)
 
@@ -81,10 +82,19 @@ If you installed before write support, your existing token lacks `chat:write` an
 1. [api.slack.com/apps](https://api.slack.com/apps) -> your app -> **OAuth & Permissions** -> **User Token Scopes**.
 2. Add **`chat:write`** (post/update/delete) and, if you will use `to_user` to DM people, **`im:write`** (opens the DM).
 3. **Save** changes, then click **Reinstall to {Workspace}** (Slack requires a reinstall for new scopes to take effect).
-4. Copy the new **User OAuth Token** (`xoxp-...`) - it changes on reinstall.
-5. `export SLACK_USER_TOKEN=xoxp-...` with the new value.
+4. The User OAuth Token (`xoxp-...`) stays the same across reinstalls for standard apps - new scopes attach to the existing token, so `SLACK_USER_TOKEN` needs no update. If Slack ever shows a different value on that page, copy it and update the env var.
 
 No `/invite` step is needed at any point.
+
+#### Upgrading for image attachments (v1.2.0+)
+
+`slack_post_message` accepts local image paths via the `images` param (png, jpg, jpeg, gif, webp, bmp, svg). That upload flow needs the **`files:write`** User Token Scope - text-only posts do not. To add it:
+
+1. [api.slack.com/apps](https://api.slack.com/apps) -> your app -> **OAuth & Permissions** -> **User Token Scopes**.
+2. Add **`files:write`**.
+3. **Save**, then **Reinstall to {Workspace}**. The token value survives reinstalls (scopes attach to it), so `SLACK_USER_TOKEN` needs no update.
+
+Image posts go out as one file-share message: the text travels as the message's comment, and `thread_ts` still threads the reply. Paths are checked (exists + supported type) before the review dialog opens.
 
 ### 3. Install to workspace
 
